@@ -14,8 +14,7 @@ html,body{
 }
 canvas.webgl{
   position:fixed; inset:0; width:100vw; height:100vh; background:#000;
-  z-index:var(--z-canvas);
-  pointer-events:none;                 /* UI дээр даруулахын тулд */
+  z-index:var(--z-canvas);                 /* UI дээр даруулахын тулд */
 }
 
 /* Debug */
