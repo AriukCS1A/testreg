@@ -2,12 +2,13 @@
 import { VIDEO_ROT_Z } from "./config.js";
 import { dbg } from "./utils.js";
 
-let THREE, ZT; // ZapparThree
+let THREE, ZT; // ZapparThree (UMD-ээс)
 export let renderer, camera, scene, tracker, anchor, plane;
 export let scaleFactor = 1.35;
 const MIN_S = 0.6, MAX_S = 3;
 
 let onFrameCb = null;
+let cameraStarted = false; // ← камераа нэг л удаа асаана
 
 export async function initAR() {
   ({ THREE, ZapparThree: ZT } = await window.__depsReady);
@@ -57,9 +58,6 @@ export async function initAR() {
   );
   anchor.add(plane);
 
-  // Gestures
-  hookGestures();
-
   // Render loop
   let anchorSet = false;
   renderer.setAnimationLoop(() => {
@@ -70,11 +68,15 @@ export async function initAR() {
     onFrameCb?.();
   });
 
-  // Visibility/focus
+  // ⚠️ Permission авахаас өмнө start() бүү дуудаарай
   document.addEventListener("visibilitychange", () => {
+    if (!cameraStarted) return;
     try { document.hidden ? camera.pause() : camera.start(); } catch {}
   });
-  window.addEventListener("focus", () => { try { camera.start(); } catch {} });
+  window.addEventListener("focus", () => {
+    if (!cameraStarted) return;
+    try { camera.start(); } catch {}
+  });
 
   // WebGL context guards
   const gl = renderer.getContext();
@@ -85,7 +87,7 @@ export async function initAR() {
   gl.canvas.addEventListener("webglcontextrestored", () => {
     ZT.glContextSet(renderer.getContext());
     scene.background = camera.backgroundTexture;
-    try { camera.start(); } catch {}
+    if (cameraStarted) { try { camera.start(); } catch {} }
     dbg("webgl context RESTORED + camera restarted");
   });
 
@@ -94,20 +96,31 @@ export async function initAR() {
 
 export function onFrame(cb) { onFrameCb = cb; }
 
-// Камер зөв асаалт
+/* ===== Камер зөв асаалт ===== */
 export async function ensureCamera() {
+  if (cameraStarted) return; // аль хэдийн ассан
+
   dbg("asking camera permission…");
   try {
-    const ok = await ZT.permissionRequest();
-    dbg("permission result: " + ok);
-    if (!ok) { ZT.permissionDeniedUI(); throw new Error("camera permission denied"); }
+    // 1) Аль хэдийн зөвшөөрөгдсөн эсэх
+    let granted = await ZT.permissionGranted();
+    // 2) Хэрэв биш бол зөвшөөрөл хүснэ (UI-гүй хувилбар)
+    if (!granted) {
+      try { granted = await ZT.permissionRequest(); } catch { granted = false; }
+    }
+    // 3) Татгалзсан бол алдаа + зааврын UI
+    if (!granted) {
+      await ZT.permissionDeniedUI();
+      throw new Error("camera permission denied");
+    }
 
-    await camera.start();
-
-    // 🔑 Зарим төхөөрөмж дээр backgroundTexture binding-д 1 frame хэрэгтэй
+    // 4) Зөвшөөрсөн үед л камераа асаана
+    await camera.start(); // rear camera
     scene.background = camera.backgroundTexture;
-    await new Promise(r => requestAnimationFrame(r));
+    cameraStarted = true;
 
+    // 1 frame хүлээгээд bg bind баталгаажуулна
+    await new Promise(r => requestAnimationFrame(r));
     dbg("camera started (bg bound)");
   } catch (e) {
     dbg("camera start failed: " + (e?.message || e));
@@ -115,7 +128,7 @@ export async function ensureCamera() {
   }
 }
 
-// ===== ВИДЕО / ТЕКСТУР =====
+/* ===== ВИДЕО / ТЕКСТУР ===== */
 export function setSources(videoEl, webm = "", mp4 = "", forceMP4 = false) {
   videoEl.crossOrigin = "anonymous";
   videoEl.setAttribute("playsinline", "");
@@ -202,7 +215,7 @@ export function makeSbsAlphaMaterial(tex) {
   });
 }
 
-// ===== Туслах =====
+/* ===== Туслах ===== */
 export function worldToScreen(v) {
   if (!renderer || !camera) return { x: -9999, y: -9999 };
   const rect = renderer.domElement.getBoundingClientRect();
