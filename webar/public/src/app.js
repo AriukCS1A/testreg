@@ -4,9 +4,9 @@ import {
 } from "./config.js";
 import { isIOS, dbg } from "./utils.js";
 import {
-  initAR, ensureCamera, onFrame, setSources, videoTexture,
+  initAR, ensureCamera, onFrame, videoTexture,
   fitPlaneToVideo, makeSbsAlphaMaterial, applyScale
-} from "./ar.js";
+} from "./ar.js"; // ⬅️ setSources-г авч хаясан
 import {
   bindIntroButtons, updateIntroButtons, showMenuOverlay, closeMenu, stopIntroButtons
 } from "./ui.js";
@@ -73,9 +73,30 @@ const fbApp = initializeApp(firebaseConfig);
 const auth  = getAuth(fbApp);
 const db    = getFirestore(fbApp);
 
+// ====== Video sources – canplay хүртэл хүлээдэг туслах ======
+async function setSourcesAwait(v, webm, mp4, forceMp4=false){
+  try{ v.pause(); }catch{}
+  v.removeAttribute('src');
+  while (v.firstChild) v.removeChild(v.firstChild);
+  v.load();
+
+  const ss = [];
+  if (!forceMp4 && webm){ const s=document.createElement('source'); s.src=webm; s.type='video/webm'; ss.push(s); }
+  if (mp4){ const s=document.createElement('source'); s.src=mp4; s.type='video/mp4'; ss.push(s); }
+  ss.forEach(s=>v.appendChild(s));
+
+  await new Promise((res, rej)=>{
+    const onErr = ()=>rej(new Error('video load failed'));
+    v.addEventListener('error', onErr, { once:true });
+    if (v.readyState >= 3) res();               // HAVE_FUTURE_DATA
+    else v.addEventListener('canplay', ()=>res(), { once:true });
+  });
+}
+
 // ====== Түр бүртгэлийн жижиг UI (OTP-гүй) ======
 function renderQuickRegister(){
   const host = document.createElement("div");
+  host.id = "quick-register"; // CSS-тайгаа таарууллаа
   Object.assign(host.style, {
     position:"fixed", left:"50%", bottom:"24px", transform:"translateX(-50%)",
     zIndex:9999, background:"rgba(0,0,0,.6)", backdropFilter:"blur(6px)",
@@ -124,10 +145,22 @@ function renderQuickRegister(){
 
       $msg.textContent = "✅ Амжилттай!";
       $inp.value = "";
+
+      // Амжилттай бүртгэсний дараа л интро эхлүүлнэ
+      if (!window.__introStarted) {
+        window.__introStarted = true;
+        host.remove();
+        await startIntroFlow(true);
+      }
+
       setTimeout(()=>{ $msg.textContent = ""; }, 2500);
     }catch(e){
       console.error(e);
       $msg.textContent = "❌ Алдаа: " + (e.message || "бүртгэл амжилтгүй");
+
+      // ⬇︎ Хөгжүүлэлтийн үед Firebase config-гүй бол интро-г хүчээр эхлүүлэхийг хүсвэл тайлбарласан 3 мөрийг идэвхжүүлж болно.
+      // if (!window.__introStarted) { window.__introStarted = true; host.remove(); await startIntroFlow(true); }
+
       setTimeout(()=>{ $msg.textContent = ""; }, 4000);
     }finally{
       busy = false;
@@ -138,7 +171,7 @@ function renderQuickRegister(){
 // ====== main ======
 await initAR();
 
-// Урьдчилж anonymous оролдоно (сайн дураар)
+// Урьдчилж anonymous оролдоно (заавал биш)
 signInAnonymously(auth).catch(()=>{});
 
 // GPS нэг удаа авч debug-д харуулна (алдаа бол зүгээр)
@@ -147,32 +180,29 @@ try{
   if (pos) dbg(fmtLoc(pos));
 }catch{}
 
-// Интро урсгал руу орно
-await startIntroFlow(true);
+// ✅ Эхлээд бүртгэлийн UI-гаа гаргана; амжилттай болсны дараа startIntroFlow() дуудагдана
+renderQuickRegister();
 
-// tap-to-start fallback
+// tap-to-start fallback (интро аль хэдийн эхэлсэн үед л ажиллана)
 tapLay.addEventListener("pointerdown", async ()=>{
   tapLay.style.display="none";
-  try{ await startIntroFlow(true); }catch(e){ dbg("after tap failed: "+(e?.message||e)); }
+  try{ if (window.__introStarted) await startIntroFlow(true); }catch(e){ dbg("after tap failed: "+(e?.message||e)); }
 });
 
-// Меню товч
+// Меню товч (интро эхэлсний дараа харагдана)
 document.getElementById("mExercise")?.addEventListener("click", startExerciseDirect);
 
 // render callback (интро үед world-tracked UI-г хөдөлгөх)
 onFrame(()=>{ if (currentVideo===vIntro) updateIntroButtons(); });
 
-// Түр бүртгэлийн UI-г асаая
-renderQuickRegister();
-
 // ===== flows =====
 async function startIntroFlow(fromTap=false){
   bindIntroButtons(vIntro);
-
   await ensureCamera();
 
-  setSources(vIntro, INTRO_WEBM_URL, INTRO_MP4_URL, isIOS);
-  setSources(vEx,    EXERCISE_WEBM_URL, EXERCISE_MP4_URL, isIOS);
+  // Видеонуудыг бүрэн ачаалдтал нь хүлээнэ
+  await setSourcesAwait(vIntro, INTRO_WEBM_URL, INTRO_MP4_URL, isIOS);
+  await setSourcesAwait(vEx,    EXERCISE_WEBM_URL, EXERCISE_MP4_URL, isIOS);
 
   const texIntro = videoTexture(vIntro);
   if (isIOS) {
@@ -225,7 +255,8 @@ async function startExerciseDirect(){
 
   try{ currentVideo?.pause?.(); }catch{}
 
-  setSources(vEx, EXERCISE_WEBM_URL, EXERCISE_MP4_URL, isIOS);
+  // Дасгалын видеог мөн canplay хүртэл хүлээнэ
+  await setSourcesAwait(vEx, EXERCISE_WEBM_URL, EXERCISE_MP4_URL, isIOS);
   const texEx = videoTexture(vEx);
   if (isIOS) planeUseShader(texEx); else planeUseMap(texEx);
 

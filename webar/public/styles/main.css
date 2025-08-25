@@ -1,72 +1,94 @@
-:root { --z-ui:5; --z-menu:6; --z-debug:20; --z-otp:99 }
+:root{
+  --z-canvas: 1;      /* AR canvas хамгийн доор */
+  --z-ui: 5000;       /* интро товч, tap-to-start, unmute */
+  --z-menu: 6000;     /* меню overlay */
+  --z-otp: 7000;      /* OTP gate */
+  --z-debug: 9000;    /* debug тууз */
+  --z-qr: 2147483647; /* түр бүртгэлийн жижиг UI хамгийн дээр */
+}
 
 /* Base */
-html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:system-ui,Arial,sans-serif}
-canvas.webgl{position:fixed;inset:0;width:100vw;height:100vh;background:#000}
+html,body{
+  margin:0; height:100%; overflow:hidden; background:#000;
+  font-family:system-ui,Arial,sans-serif;
+}
+canvas.webgl{
+  position:fixed; inset:0; width:100vw; height:100vh; background:#000;
+  z-index:var(--z-canvas);
+  pointer-events:none;                 /* UI дээр даруулахын тулд */
+}
 
 /* Debug */
 #debug{
-  position:fixed;left:10px;top:10px;z-index:var(--z-debug);
-  color:#0f0;background:rgba(0,0,0,.5);
-  padding:6px 8px;border-radius:6px;font:12px/1.25 monospace;
-  white-space:pre-wrap;max-width:92vw
+  position:fixed; left:10px; top:10px; z-index:var(--z-debug);
+  color:#0f0; background:rgba(0,0,0,.5);
+  padding:6px 8px; border-radius:6px; font:12px/1.25 monospace;
+  white-space:pre-wrap; max-width:92vw;
 }
 
 /* Buttons */
 .btn{
-  padding:14px 18px;border:0;border-radius:14px;cursor:pointer;
-  background:#fff;color:#111;font-weight:700;
-  box-shadow:0 8px 28px rgba(0,0,0,.25)
+  padding:14px 18px; border:0; border-radius:14px; cursor:pointer;
+  background:#fff; color:#111; font-weight:700;
+  box-shadow:0 8px 28px rgba(0,0,0,.25);
 }
-.btn.full{width:100%}
-.ghost{background:transparent;border:1px dashed rgba(255,255,255,.25);color:#fff}
+.btn.full{ width:100%; }
+.ghost{ background:transparent; border:1px dashed rgba(255,255,255,.25); color:#fff; }
 
 /* Tap-to-start / Unmute */
-#tapToStart{position:fixed;inset:0;display:none;place-items:center;background:#000;z-index:var(--z-ui)}
-#btnUnmute{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:var(--z-ui);display:none}
+#tapToStart{
+  position:fixed; inset:0; display:none; place-items:center; background:#000;
+  z-index:var(--z-ui);
+}
+#btnUnmute{
+  position:fixed; left:50%; bottom:18px; transform:translateX(-50%);
+  z-index:var(--z-ui); display:none;
+}
 
 /* Intro overlay buttons (world-tracked UI) */
-#overlayIntroBtns{position:fixed;inset:0;z-index:var(--z-ui);pointer-events:none}
-.introbtn{
-  position:absolute;transform:translate(-50%,-50%);
-  display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;
-  background:rgba(0,0,0,.62);color:#fff;font-weight:800;letter-spacing:.2px;
-  box-shadow:0 12px 36px rgba(0,0,0,.55);white-space:nowrap;
-  opacity:0;transition:opacity .25s ease,left .25s ease,top .25s ease,transform .25s ease;
-  user-select:none;pointer-events:none;font-size:14px
+#overlayIntroBtns{
+  position:fixed; inset:0; z-index:var(--z-ui); pointer-events:none;
 }
-.introbtn.show{opacity:1}
-.introbtn.mini{transform:translate(-50%,-50%) scale(.88)}
-.introbtn:active{transform:translate(-50%,-50%) scale(.96)}
+.introbtn{
+  position:absolute; transform:translate(-50%,-50%);
+  display:flex; align-items:center; gap:12px; padding:14px 16px; border-radius:14px;
+  background:rgba(0,0,0,.62); color:#fff; font-weight:800; letter-spacing:.2px;
+  box-shadow:0 12px 36px rgba(0,0,0,.55); white-space:nowrap;
+  opacity:0; transition:opacity .25s ease,left .25s ease,top .25s ease,transform .25s ease;
+  user-select:none; pointer-events:none; font-size:14px;
+}
+.introbtn.show{ opacity:1; }
+.introbtn.mini{ transform:translate(-50%,-50%) scale(.88); }
+.introbtn:active{ transform:translate(-50%,-50%) scale(.96); }
 
 /* Menu overlay */
 #menu{
-  position:fixed;inset:0;display:none;align-items:center;justify-content:center;
-  z-index:var(--z-menu);background:rgba(0,0,0,.35);backdrop-filter:blur(6px);
-  animation:fadeIn .25s ease forwards
+  position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+  z-index:var(--z-menu); background:rgba(0,0,0,.35); backdrop-filter:blur(6px);
+  animation:fadeIn .25s ease forwards;
 }
 .menu-panel{
   width:min(520px,92vw);
   background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.06));
-  border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:20px 18px;
-  box-shadow:0 20px 60px rgba(0,0,0,.35);transform:scale(.96);opacity:0;
-  animation:popIn .28s .1s ease forwards
+  border:1px solid rgba(255,255,255,.18); border-radius:20px; padding:20px 18px;
+  box-shadow:0 20px 60px rgba(0,0,0,.35); transform:scale(.96); opacity:0;
+  animation:popIn .28s .1s ease forwards;
 }
-.menu-title{margin:0 0 10px;color:#fff;text-align:center;font-weight:800;letter-spacing:.3px}
-.menu-sub{margin:0 0 18px;color:#d6e2ff;text-align:center;font-size:13px;opacity:.85}
-.menu-grid{display:grid;gap:12px}
+.menu-title{ margin:0 0 10px; color:#fff; text-align:center; font-weight:800; letter-spacing:.3px; }
+.menu-sub{ margin:0 0 18px; color:#d6e2ff; text-align:center; font-size:13px; opacity:.85; }
+.menu-grid{ display:grid; gap:12px; }
 .card{
-  display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;cursor:pointer;
-  background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:#fff;
-  user-select:none;transform:translateY(12px);opacity:0;animation:slideUp .35s ease forwards
+  display:flex; align-items:center; gap:12px; padding:14px 16px; border-radius:14px; cursor:pointer;
+  background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15); color:#fff;
+  user-select:none; transform:translateY(12px); opacity:0; animation:slideUp .35s ease forwards;
 }
-.card:nth-child(1){animation-delay:.18s}
-.card:nth-child(2){animation-delay:.28s}
-.card:nth-child(3){animation-delay:.38s}
-.card:hover{transform:translateY(0) scale(1.01);background:rgba(255,255,255,.12)}
-.card .icon{width:36px;height:36px;border-radius:12px;background:rgba(255,255,255,.15);display:grid;place-items:center;font-size:18px}
-.card .ttl{font-weight:800}
-.row{display:flex;gap:10px;justify-content:center;margin-top:12px}
+.card:nth-child(1){ animation-delay:.18s; }
+.card:nth-child(2){ animation-delay:.28s; }
+.card:nth-child(3){ animation-delay:.38s; }
+.card:hover{ transform:translateY(0) scale(1.01); background:rgba(255,255,255,.12); }
+.card .icon{ width:36px; height:36px; border-radius:12px; background:rgba(255,255,255,.15); display:grid; place-items:center; font-size:18px; }
+.card .ttl{ font-weight:800; }
+.row{ display:flex; gap:10px; justify-content:center; margin-top:12px; }
 
 /* OTP Gate */
 #otpGate{
@@ -77,31 +99,46 @@ canvas.webgl{position:fixed;inset:0;width:100vw;height:100vh;background:#000}
 .otp-panel{
   width:min(520px,92vw);
   background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.06));
-  border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:22px 18px;color:#fff;
-  box-shadow:0 20px 60px rgba(0,0,0,.35);transform:scale(.98);animation:popIn .25s ease forwards
+  border:1px solid rgba(255,255,255,.18); border-radius:20px; padding:22px 18px; color:#fff;
+  box-shadow:0 20px 60px rgba(0,0,0,.35); transform:scale(.98); animation:popIn .25s ease forwards;
 }
-.otp-title{margin:0 0 8px;text-align:center;font-weight:800}
-.otp-sub{margin:0 0 14px;text-align:center;color:#d6e2ff;opacity:.9;font-size:13px}
+.otp-title{ margin:0 0 8px; text-align:center; font-weight:800; }
+.otp-sub{ margin:0 0 14px; text-align:center; color:#d6e2ff; opacity:.9; font-size:13px; }
 .otp-field{
-  display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.08);
-  border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:10px 12px;margin-bottom:10px
+  display:flex; align-items:center; gap:8px; background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.15); border-radius:14px; padding:10px 12px; margin-bottom:10px;
 }
-.otp-field span{opacity:.9}
+.otp-field span{ opacity:.9; }
 .otp-field input{
-  flex:1;background:transparent;border:0;outline:0;color:#fff;font-size:16px;letter-spacing:.3px
+  flex:1; background:transparent; border:0; outline:0; color:#fff; font-size:16px; letter-spacing:.3px;
 }
-.otp-code-wrap{margin-top:12px}
-.otp-inputs{display:flex;gap:8px;justify-content:center;margin:10px 0 8px}
+.otp-code-wrap{ margin-top:12px; }
+.otp-inputs{ display:flex; gap:8px; justify-content:center; margin:10px 0 8px; }
 .otp-inputs input{
-  width:42px;height:48px;text-align:center;font-size:20px;font-weight:800;color:#111;
-  background:#fff;border:0;border-radius:10px;outline:0
+  width:42px; height:48px; text-align:center; font-size:20px; font-weight:800; color:#111;
+  background:#fff; border:0; border-radius:10px; outline:0;
 }
-.otp-error{margin-top:6px;color:#ffb4b4;font-size:13px;text-align:center;min-height:18px}
-.otp-meta{font-size:12px;text-align:center;opacity:.85}
-.devtools{display:flex;justify-content:space-between;gap:8px;margin-top:10px}
-.devtools .hint{font-size:12px;opacity:.85}
+.otp-error{ margin-top:6px; color:#ffb4b4; font-size:13px; text-align:center; min-height:18px; }
+.otp-meta{ font-size:12px; text-align:center; opacity:.85; }
+.devtools{ display:flex; justify-content:space-between; gap:8px; margin-top:10px; }
+.devtools .hint{ font-size:12px; opacity:.85; }
+
+/* ✅ Түр бүртгэлийн жижиг UI (JS-д host.id="quick-register") */
+#quick-register{
+  position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
+  z-index:var(--z-qr); pointer-events:auto;
+  background:rgba(0,0,0,.6); backdrop-filter:blur(6px);
+  color:#fff; padding:8px 10px; border-radius:12px; display:flex; gap:8px; align-items:center;
+  box-shadow:0 6px 18px rgba(0,0,0,.35);
+}
+#quick-register input{
+  padding:6px 8px; border-radius:8px; border:0; outline:none; width:150px;
+}
+#quick-register button{
+  padding:6px 10px; border-radius:8px; border:0; font-weight:700; background:#22d3ee; color:#07202a;
+}
 
 /* Animations */
-@keyframes fadeIn{from{opacity:0}to{opacity:1}}
-@keyframes popIn{to{opacity:1;transform:scale(1)}}
-@keyframes slideUp{to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{ from{opacity:0} to{opacity:1} }
+@keyframes popIn{ to{opacity:1; transform:scale(1)} }
+@keyframes slideUp{ to{opacity:1; transform:translateY(0)} }
