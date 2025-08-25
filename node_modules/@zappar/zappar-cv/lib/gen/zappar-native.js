@@ -1,0 +1,75 @@
+export var barcode_format_t;
+(function (barcode_format_t) {
+    barcode_format_t[barcode_format_t["UNKNOWN"] = 131072] = "UNKNOWN";
+    barcode_format_t[barcode_format_t["AZTEC"] = 1] = "AZTEC";
+    barcode_format_t[barcode_format_t["CODABAR"] = 2] = "CODABAR";
+    barcode_format_t[barcode_format_t["CODE_39"] = 4] = "CODE_39";
+    barcode_format_t[barcode_format_t["CODE_93"] = 8] = "CODE_93";
+    barcode_format_t[barcode_format_t["CODE_128"] = 16] = "CODE_128";
+    barcode_format_t[barcode_format_t["DATA_MATRIX"] = 32] = "DATA_MATRIX";
+    barcode_format_t[barcode_format_t["EAN_8"] = 64] = "EAN_8";
+    barcode_format_t[barcode_format_t["EAN_13"] = 128] = "EAN_13";
+    barcode_format_t[barcode_format_t["ITF"] = 256] = "ITF";
+    barcode_format_t[barcode_format_t["MAXICODE"] = 512] = "MAXICODE";
+    barcode_format_t[barcode_format_t["PDF_417"] = 1024] = "PDF_417";
+    barcode_format_t[barcode_format_t["QR_CODE"] = 2048] = "QR_CODE";
+    barcode_format_t[barcode_format_t["RSS_14"] = 4096] = "RSS_14";
+    barcode_format_t[barcode_format_t["RSS_EXPANDED"] = 8192] = "RSS_EXPANDED";
+    barcode_format_t[barcode_format_t["UPC_A"] = 16384] = "UPC_A";
+    barcode_format_t[barcode_format_t["UPC_E"] = 32768] = "UPC_E";
+    barcode_format_t[barcode_format_t["UPC_EAN_EXTENSION"] = 65536] = "UPC_EAN_EXTENSION";
+    barcode_format_t[barcode_format_t["ALL"] = 131071] = "ALL";
+})(barcode_format_t || (barcode_format_t = {}));
+;
+export var face_landmark_name_t;
+(function (face_landmark_name_t) {
+    face_landmark_name_t[face_landmark_name_t["EYE_LEFT"] = 0] = "EYE_LEFT";
+    face_landmark_name_t[face_landmark_name_t["EYE_RIGHT"] = 1] = "EYE_RIGHT";
+    face_landmark_name_t[face_landmark_name_t["EAR_LEFT"] = 2] = "EAR_LEFT";
+    face_landmark_name_t[face_landmark_name_t["EAR_RIGHT"] = 3] = "EAR_RIGHT";
+    face_landmark_name_t[face_landmark_name_t["NOSE_BRIDGE"] = 4] = "NOSE_BRIDGE";
+    face_landmark_name_t[face_landmark_name_t["NOSE_TIP"] = 5] = "NOSE_TIP";
+    face_landmark_name_t[face_landmark_name_t["NOSE_BASE"] = 6] = "NOSE_BASE";
+    face_landmark_name_t[face_landmark_name_t["LIP_TOP"] = 7] = "LIP_TOP";
+    face_landmark_name_t[face_landmark_name_t["LIP_BOTTOM"] = 8] = "LIP_BOTTOM";
+    face_landmark_name_t[face_landmark_name_t["MOUTH_CENTER"] = 9] = "MOUTH_CENTER";
+    face_landmark_name_t[face_landmark_name_t["CHIN"] = 10] = "CHIN";
+    face_landmark_name_t[face_landmark_name_t["EYEBROW_LEFT"] = 11] = "EYEBROW_LEFT";
+    face_landmark_name_t[face_landmark_name_t["EYEBROW_RIGHT"] = 12] = "EYEBROW_RIGHT";
+})(face_landmark_name_t || (face_landmark_name_t = {}));
+;
+export var instant_world_tracker_transform_orientation_t;
+(function (instant_world_tracker_transform_orientation_t) {
+    instant_world_tracker_transform_orientation_t[instant_world_tracker_transform_orientation_t["WORLD"] = 3] = "WORLD";
+    instant_world_tracker_transform_orientation_t[instant_world_tracker_transform_orientation_t["MINUS_Z_AWAY_FROM_USER"] = 4] = "MINUS_Z_AWAY_FROM_USER";
+    instant_world_tracker_transform_orientation_t[instant_world_tracker_transform_orientation_t["MINUS_Z_HEADING"] = 5] = "MINUS_Z_HEADING";
+    instant_world_tracker_transform_orientation_t[instant_world_tracker_transform_orientation_t["UNCHANGED"] = 6] = "UNCHANGED";
+})(instant_world_tracker_transform_orientation_t || (instant_world_tracker_transform_orientation_t = {}));
+;
+export var log_level_t;
+(function (log_level_t) {
+    log_level_t[log_level_t["LOG_LEVEL_NONE"] = 0] = "LOG_LEVEL_NONE";
+    log_level_t[log_level_t["LOG_LEVEL_ERROR"] = 1] = "LOG_LEVEL_ERROR";
+    log_level_t[log_level_t["LOG_LEVEL_WARNING"] = 2] = "LOG_LEVEL_WARNING";
+    log_level_t[log_level_t["LOG_LEVEL_VERBOSE"] = 3] = "LOG_LEVEL_VERBOSE";
+})(log_level_t || (log_level_t = {}));
+;
+export var frame_pixel_format_t;
+(function (frame_pixel_format_t) {
+    frame_pixel_format_t[frame_pixel_format_t["FRAME_PIXEL_FORMAT_I420"] = 0] = "FRAME_PIXEL_FORMAT_I420";
+    frame_pixel_format_t[frame_pixel_format_t["FRAME_PIXEL_FORMAT_I420A"] = 1] = "FRAME_PIXEL_FORMAT_I420A";
+    frame_pixel_format_t[frame_pixel_format_t["FRAME_PIXEL_FORMAT_I422"] = 2] = "FRAME_PIXEL_FORMAT_I422";
+    frame_pixel_format_t[frame_pixel_format_t["FRAME_PIXEL_FORMAT_I444"] = 3] = "FRAME_PIXEL_FORMAT_I444";
+    frame_pixel_format_t[frame_pixel_format_t["FRAME_PIXEL_FORMAT_NV12"] = 4] = "FRAME_PIXEL_FORMAT_NV12";
+    frame_pixel_format_t[frame_pixel_format_t["FRAME_PIXEL_FORMAT_RGBA"] = 5] = "FRAME_PIXEL_FORMAT_RGBA";
+    frame_pixel_format_t[frame_pixel_format_t["FRAME_PIXEL_FORMAT_BGRA"] = 6] = "FRAME_PIXEL_FORMAT_BGRA";
+    frame_pixel_format_t[frame_pixel_format_t["FRAME_PIXEL_FORMAT_Y"] = 7] = "FRAME_PIXEL_FORMAT_Y";
+})(frame_pixel_format_t || (frame_pixel_format_t = {}));
+;
+export var image_target_type_t;
+(function (image_target_type_t) {
+    image_target_type_t[image_target_type_t["IMAGE_TRACKER_TYPE_PLANAR"] = 0] = "IMAGE_TRACKER_TYPE_PLANAR";
+    image_target_type_t[image_target_type_t["IMAGE_TRACKER_TYPE_CYLINDRICAL"] = 1] = "IMAGE_TRACKER_TYPE_CYLINDRICAL";
+    image_target_type_t[image_target_type_t["IMAGE_TRACKER_TYPE_CONICAL"] = 2] = "IMAGE_TRACKER_TYPE_CONICAL";
+})(image_target_type_t || (image_target_type_t = {}));
+;

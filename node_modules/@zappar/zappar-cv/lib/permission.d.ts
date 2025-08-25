@@ -1,0 +1,11 @@
+export declare function permissionGrantedCamera(): boolean;
+export declare function permissionGrantedMotion(): boolean;
+export declare function permissionDeniedCamera(): boolean;
+export declare function permissionDeniedMotion(): boolean;
+export declare function permissionDeniedAny(): boolean;
+export declare function permissionGrantedAll(): boolean;
+export declare function permissionRequestAll(): Promise<void>;
+export declare function permissionRequestCamera(): Promise<void>;
+export declare function permissionRequestMotion(): Promise<false | undefined>;
+export declare function permissionRequestUI(): Promise<boolean>;
+export declare function permissionDeniedUI(): void;

@@ -1,0 +1,55 @@
+import { barcode_format_t, face_landmark_name_t, instant_world_tracker_transform_orientation_t, log_level_t } from "./gen/zappar-native";
+export interface MessageAppender {
+    int: (i: number) => void;
+    bool: (i: boolean) => void;
+    float: (i: number) => void;
+    string: (i: string) => void;
+    dataWithLength: (i: ArrayBuffer) => void;
+    type: (t: number) => void;
+    matrix4x4: (a: Float32Array) => void;
+    matrix3x3: (a: Float32Array) => void;
+    cameraModel: (a: Float32Array) => void;
+    identityCoefficients: (a: Float32Array) => void;
+    expressionCoefficients: (a: Float32Array) => void;
+    timestamp: (i: number) => void;
+    barcodeFormat: (f: barcode_format_t) => void;
+    faceLandmarkName: (f: face_landmark_name_t) => void;
+    instantTrackerTransformOrientation: (f: instant_world_tracker_transform_orientation_t) => void;
+    logLevel: (f: log_level_t) => void;
+}
+export declare class MessageSerializer {
+    private _messageSender;
+    private _freeBufferPool;
+    constructor(_messageSender: (msg: ArrayBuffer) => void);
+    private _buffer;
+    private _i32View;
+    private _f32View;
+    private _f64View;
+    private _u8View;
+    private _u8cView;
+    private _u16View;
+    private _u32View;
+    private _offset;
+    private _startOffset;
+    private _timeoutSet;
+    bufferReturn(ab: ArrayBuffer): void;
+    private _ensureArrayBuffer;
+    private _appender;
+    sendMessage(messageId: number, cb: (s: MessageAppender) => void): void;
+    private _sendOneTime;
+    private _send;
+    private int;
+    private double;
+    private float;
+    private int32Array;
+    private float32Array;
+    private booleanArray;
+    private uint8ArrayBuffer;
+    private arrayBuffer;
+    private uint8ClampedArrayBuffer;
+    private float32ArrayBuffer;
+    private uint16ArrayBuffer;
+    private int32ArrayBuffer;
+    private uint32ArrayBuffer;
+    private string;
+}

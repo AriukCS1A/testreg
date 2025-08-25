@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="mn">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <title>WebAR — Intro → Меню → Дасгал</title>
+
+  <!-- Main styles -->
+  <link rel="stylesheet" href="./styles/main.css">
+
+  <!-- ✅ Service Worker cache унтраах (хуучин vendor түгжихээс сэргийлнэ) -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations?.().then(rs => rs.forEach(r => r.unregister()));
+    }
+  </script>
+
+  <!-- Vendor (UMD) -->
+  <script src="https://unpkg.com/three@0.152.2/build/three.min.js" defer></script>
+  <!-- ✅ ЛОКАЛ vendor-аа больж UMD-ийг CDN-ээс яг энэ хувилбараар ачаал -->
+  <script src="https://unpkg.com/@zappar/zappar-threejs@2.5.2/umd/zappar-threejs.js" defer></script>
+
+  <!-- Vendor бэлэн болмогц Promise-аар авах -->
+  <script>
+    window.__depsReady = new Promise(res => addEventListener('load', () => {
+      res({ THREE: window.THREE, ZapparThree: window.ZapparThree });
+    }, { once:true }));
+  </script>
+</head>
+<body>
+  <div id="debug">DEBUG: boot…</div>
+
+  <!-- Tap-to-start -->
+  <div id="tapToStart"><button class="btn">▶ Эхлүүлэх (дуу нээх)</button></div>
+  <button id="btnUnmute" class="btn">🔊 Дууг асаах</button>
+
+  <!-- Intro buttons -->
+  <div id="overlayIntroBtns">
+    <div id="ibExercise" class="introbtn">🏃 ДАСГАЛ</div>
+    <div id="ibGrowth" class="introbtn">🌱 ХӨГЖИЛ</div>
+    <div id="ibKnowledge" class="introbtn">📘 ХИЧЭЭЛ</div>
+  </div>
+
+  <!-- Меню -->
+  <div id="menu">
+    <div class="menu-panel">
+      <h2 class="menu-title">AR Меню</h2>
+      <p class="menu-sub">Туршлагаа сонгоно уу</p>
+      <div class="menu-grid">
+        <div class="card" id="mExercise">
+          <div class="icon">🏃</div>
+          <div><div class="ttl">Дасгал</div><div style="opacity:.8;font-size:12px">Шууд тоглуулах</div></div>
+        </div>
+        <div class="card" id="mGrowth"><div class="icon">🌱</div><div><div class="ttl">Хувь хүний хөгжил</div><div style="opacity:.8;font-size:12px">Тун удахгүй</div></div></div>
+        <div class="card" id="mKnowledge"><div class="icon">📘</div><div><div class="ttl">Хичээл</div><div style="opacity:.8;font-size:12px">Тун удахгүй</div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OTP Gate -->
+  <div id="otpGate" hidden>
+    <div class="otp-panel">
+      <h3 class="otp-title">баталгаажуулалт</h3>
+      <p class="otp-sub">Утасны дугаараа оруулж 6 оронтой кодоор баталгаажуулна уу.</p>
+      <div class="otp-field"><span>+976</span><input id="otpPhone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="Утасны дугаар (8 цифр)" maxlength="8"></div>
+      <button id="btnSendCode" class="btn full">Код авах</button>
+      <div id="otpCodeWrap" class="otp-code-wrap" hidden>
+        <div class="otp-inputs" id="otpInputs"></div>
+        <button id="btnVerifyCode" class="btn full">Баталгаажуулах</button>
+        <div class="otp-meta"><span id="otpTimer">60</span> сек дараа дахин илгээх боломжтой.
+          <div><button id="btnResend" class="btn ghost" disabled>Дахин илгээх</button></div>
+        </div>
+      </div>
+      <div class="otp-error" id="otpError"></div>
+      <div class="devtools"><span class="hint">Туршилтын код: <b>000000</b></span><button id="btnOtpReset" class="btn ghost">Дахин турших</button></div>
+    </div>
+  </div>
+
+  <!-- Hidden videos -->
+  <video id="vidIntro" playsinline preload="auto" crossorigin="anonymous" hidden></video>
+  <video id="vidExercise" playsinline preload="auto" loop crossorigin="anonymous" hidden></video>
+
+  <!-- Танай модулиуд -->
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
