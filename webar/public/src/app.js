@@ -12,6 +12,7 @@ import {
 // ======= Тохиргоо =======
 const ALLOW_DUPLICATE_TO_ENTER = false; // давхар бүртгэлтэй дугаар ч орж болох эсэх
 const DEFAULT_LOC_RADIUS_M = 200;       // QR байршил тойргийн default радиус (метр)
+const ACCURACY_BUFFER_MAX = 75;         // GPS accuracy-гаас өгөх дээд buffer (м)
 
 // 🔗 Firebase (ESM CDN) + local config
 import { firebaseConfig } from "./firebase.js";
@@ -21,9 +22,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, doc, setDoc, serverTimestamp,
-  // ↓ Firestore queries/collections
   collection, addDoc, getDoc, getDocs,
-  query as fsQuery, where, orderBy, limit,
+  query as fsQuery, where, limit,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ========= Geolocation helpers ========= */
@@ -94,7 +94,15 @@ const fbApp = initializeApp(firebaseConfig);
 const auth  = getAuth(fbApp);
 const db    = getFirestore(fbApp);
 
-/* ========= Location match helpers (NEW) ========= */
+/* ========= helpers ========= */
+// play() promise AbortError-оос сэргийлэх
+async function safePlay(v){
+  if (!v) return;
+  try { await v.play(); }
+  catch (e) { if (e?.name !== "AbortError") throw e; }
+}
+
+/* ========= Location match helpers ========= */
 async function fetchLocationById(id){
   if (!id) return null;
   const d = await getDoc(doc(db, "locations", id)).catch(() => null);
@@ -108,7 +116,6 @@ async function fetchLocationById(id){
     radiusMeters: Number(radiusMeters || 0)
   };
 }
-
 function distanceMeters(a, b){
   const R = 6371000;
   const toRad = (x)=> x*Math.PI/180;
@@ -118,88 +125,82 @@ function distanceMeters(a, b){
   const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
-
 async function isWithinQrLocation(pos, qrLocId, fallbackRadius=DEFAULT_LOC_RADIUS_M){
   const loc = await fetchLocationById(qrLocId);
   if (!loc || !pos?.coords) {
-    return { ok:false, reason: (!loc ? "loc-missing" : "gps-missing"), loc, dist:null, radius:fallbackRadius };
+    return { ok:false, reason: (!loc ? "loc-missing" : "gps-missing"), loc, dist:null, radius:fallbackRadius, buffer:0 };
   }
   const user = { lat: Number(pos.coords.latitude), lng: Number(pos.coords.longitude) };
   const dist = distanceMeters(user, { lat: loc.lat, lng: loc.lng });
   const radius = loc.radiusMeters > 0 ? loc.radiusMeters : fallbackRadius;
-  return { ok: dist <= radius, reason: dist <= radius ? "ok" : "too-far", loc, dist, radius };
+  const buffer = Math.min(Number(pos.coords.accuracy || 0), ACCURACY_BUFFER_MAX);
+  const ok = dist <= (radius + buffer);
+  return { ok, reason: ok ? "ok" : "too-far", loc, dist, radius, buffer };
 }
 
 /* ========= Video: Sources + robust load ========= */
-// sources нэмж, canplay/error-г найдвартай сонсоно
+// Нэг нэгээр нь туршиж fallback хийх — iOS-т MP4 заавал
 async function setSourcesAwait(v, webm, mp4, forceMp4 = false) {
   try { v.pause(); } catch {}
   v.removeAttribute("src");
   while (v.firstChild) v.removeChild(v.firstChild);
 
-  // autoplay-д бэлдэх (зарим Chrome-д muted property + attribute хоёулаа хэрэгтэй)
   v.muted = true;
   v.setAttribute("muted", "");
   v.playsInline = true;
   v.crossOrigin = "anonymous";
   v.preload = "auto";
 
-  const pickMp4 = forceMp4 || !webm;
-  const first = pickMp4 ? mp4 : webm;
-  const firstType = pickMp4 ? "video/mp4" : "video/webm";
-  const alt = pickMp4 ? webm : mp4;
-  const altType = pickMp4 ? "video/webm" : "video/mp4";
-
-  const add = (url, type) => {
-    if (!url) return;
-    const s = document.createElement("source");
-    s.src = url; s.type = type;
-    v.appendChild(s);
-  };
-
-  add(first, firstType);
-  add(alt, altType); // fallback source
-
-  v.load();
-
-  // canplay эсвэл error-г хүлээнэ
-  await new Promise((res, rej) => {
-    const to = setTimeout(() => rej(new Error("video load timeout")), 12000);
-    const onReady = () => { cleanup(); res(); };
-    const onErr = () => { cleanup(); rej(new Error("video load failed")); };
-    const cleanup = () => {
-      clearTimeout(to);
-      v.removeEventListener("canplay", onReady);
-      v.removeEventListener("loadeddata", onReady);
-      v.removeEventListener("error", onErr);
-      v.removeEventListener("stalled", onErr);
-      v.removeEventListener("abort", onErr);
-    };
-    v.addEventListener("canplay", onReady, { once: true });
-    v.addEventListener("loadeddata", onReady, { once: true });
-    v.addEventListener("error", onErr, { once: true });
-    v.addEventListener("stalled", onErr, { once: true });
-    v.addEventListener("abort", onErr, { once: true });
-  });
-}
-
-// Autoplay-г найдвартай эхлүүлэх utility
-async function tryPlayAutoplay(v, { showTap = true } = {}) {
-  try {
-    await v.play();
-    return true;
-  } catch {
-    if (showTap) {
-      tapLay.style.display = "grid";
-      const onTap = async () => {
-        tapLay.style.display = "none";
-        try { await v.play(); } catch {}
-        tapLay.removeEventListener("pointerdown", onTap);
-      };
-      tapLay.addEventListener("pointerdown", onTap, { once: true });
-    }
-    return false;
+  if (forceMp4 && !mp4) {
+    throw new Error("iOS requires MP4, but no mp4 URL was provided");
   }
+
+  const candidates = [];
+  if (forceMp4) {
+    if (mp4) candidates.push({ url: mp4, type: "video/mp4" });
+  } else {
+    if (webm) candidates.push({ url: webm, type: "video/webm" });
+    if (mp4)  candidates.push({ url: mp4,  type: "video/mp4" });
+  }
+  if (candidates.length === 0) throw new Error("No playable sources");
+
+  async function tryOne(c) {
+    while (v.firstChild) v.removeChild(v.firstChild);
+    const s = document.createElement("source");
+    s.src = c.url; s.type = c.type;
+    v.appendChild(s);
+    v.load();
+
+    dbg(`VIDEO: trying ${c.type} → ${c.url}`);
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => onErr(new Error("video load timeout")), 15000);
+      const onOk = () => { cleanup(); resolve(true); };
+      const onErr = (e) => { cleanup(); dbg(`VIDEO: failed ${c.type} (${e?.message || e})`); reject(e || new Error("video load failed")); };
+      const cleanup = () => {
+        clearTimeout(timeout);
+        v.removeEventListener("canplay", onOk);
+        v.removeEventListener("loadeddata", onOk);
+        v.removeEventListener("error", onErr);
+        v.removeEventListener("stalled", onErr);
+        v.removeEventListener("abort", onErr);
+        s.removeEventListener("error", onErr);
+      };
+      v.addEventListener("canplay", onOk, { once: true });
+      v.addEventListener("loadeddata", onOk, { once: true });
+      v.addEventListener("error", onErr, { once: true });
+      v.addEventListener("stalled", onErr, { once: true });
+      v.addEventListener("abort", onErr, { once: true });
+      s.addEventListener("error", onErr, { once: true });
+    });
+  }
+
+  let lastErr;
+  for (const c of candidates) {
+    try { await tryOne(c); return; }
+    catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error("video load failed");
 }
 
 // Видео дебаг (шаардлагатай бол дуудаад лог хар)
@@ -223,8 +224,7 @@ function pickSourcesFromDoc(v) {
   return { webm: null, mp4: null };
 }
 
-// Global intro (isGlobal == true), хамгийн сүүлийнх
-// Global intro: хамгийн идэвхтэй глобал нь ганцхан байна гэсэн дүрэмтэй байгаад limit(1)
+// Global intro: идэвхтэй глобал нь ганц гэж үзээд limit(1)
 async function fetchLatestIntro() {
   const col = collection(db, "videos");
   const q = fsQuery(
@@ -247,14 +247,12 @@ async function fetchLatestExerciseFor(locationId) {
     where("active", "==", true),
     where("isGlobal", "==", false),
     where("locationIds", "array-contains", locationId),
-    // Хэрвээ илүү найдвартай хүсвэл энд where("isCurrent","==",true) нэмэж болно
     limit(1)
   );
   const snap = await getDocs(q);
   if (snap.empty) return null;
   return { id: snap.docs[0].id, ...snap.docs[0].data() };
 }
-
 
 /* ========= Scan LOG ========= */
 async function logScan({ phone, loc, pos, ua, decision }) {
@@ -271,7 +269,7 @@ async function logScan({ phone, loc, pos, ua, decision }) {
       lat: Number(pos?.coords?.latitude ?? null),
       lng: Number(pos?.coords?.longitude ?? null),
       accuracy: Number(pos?.coords?.accuracy ?? null),
-      decision: decision || null, // { ok, dist, radius, reason }
+      decision: decision || null, // { ok, dist, radius, buffer, reason }
       ua: String(ua || "").slice(0, 1000),
       source: "webar",
       createdAt: serverTimestamp(),
@@ -346,21 +344,29 @@ function showPhoneGate() {
               await startIntroFlow(true);
             }
           }
-          // бүртгэл давхардуулсан ч доор scan-аа LOG хийж болно:
+          // бүртгэл давхардуулсан ч LOG:
           const chkOld = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
-          await logScan({ phone, loc: QR_LOC_ID, pos, ua: navigator.userAgent, decision: {
-            ok: chkOld.ok, dist: Math.round(chkOld.dist || 0), radius: chkOld.radius, reason: chkOld.reason
-          }});
+          await logScan({
+            phone, loc: QR_LOC_ID, pos, ua: navigator.userAgent, decision: {
+              ok: chkOld.ok, dist: Math.round(chkOld.dist || 0),
+              radius: chkOld.radius, buffer: Math.round(chkOld.buffer || 0),
+              reason: chkOld.reason
+            }
+          });
           return;
         }
         throw e;
       }
 
-      // 3) Уншуулсан бүрийг LOG хийнэ (+ decision)
+      // 3) LOG (+ decision)
       const chk = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
-      await logScan({ phone, loc: QR_LOC_ID, pos, ua: navigator.userAgent, decision: {
-        ok: chk.ok, dist: Math.round(chk.dist || 0), radius: chk.radius, reason: chk.reason
-      }});
+      await logScan({
+        phone, loc: QR_LOC_ID, pos, ua: navigator.userAgent, decision: {
+          ok: chk.ok, dist: Math.round(chk.dist || 0),
+          radius: chk.radius, buffer: Math.round(chk.buffer || 0),
+          reason: chk.reason
+        }
+      });
 
       // 4) Амжилттай → AR эхлүүлнэ
       otpGate.hidden = true;
@@ -393,11 +399,17 @@ try {
 // ✅ Эхлээд форм
 showPhoneGate();
 
-// Tap-to-start fallback (интро аль хэдийн эхэлсэн үед л хэрэгтэй)
+// Tap-to-start fallback (интро аль хэдийн эхэлсэн үед үргэлжлүүлэх)
 tapLay.addEventListener("pointerdown", async () => {
   tapLay.style.display = "none";
-  try { if (window.__introStarted) await startIntroFlow(true); }
-  catch (e) { dbg("after tap failed: " + (e?.message || e)); }
+  try {
+    if (currentVideo) {
+      await safePlay(currentVideo);
+    } else if (!window.__introStarted) {
+      window.__introStarted = true;
+      await startIntroFlow(true);
+    }
+  } catch (e) { dbg("after tap failed: " + (e?.message || e)); }
 });
 
 // Меню товч
@@ -407,118 +419,130 @@ document.getElementById("mExercise")?.addEventListener("click", startExerciseDir
 onFrame(() => { if (currentVideo === vIntro) updateIntroButtons(); });
 
 /* ========= Flows ========= */
+let introLoading = false;
 async function startIntroFlow(fromTap = false) {
-  bindIntroButtons(vIntro);
+  if (introLoading) return; // давхар эхлүүлэхгүй
+  introLoading = true;
+  try {
+    bindIntroButtons(vIntro);
 
-  // Камерын зөвшөөрөл
-  try { await ensureCamera(); }
-  catch (e) { dbg("camera start failed: " + (e?.message || e)); return; }
+    // Камерын зөвшөөрөл
+    try { await ensureCamera(); }
+    catch (e) { dbg("camera start failed: " + (e?.message || e)); return; }
 
-  // 🔹 Firestore-оос видеонуудыг татна
-  const introDoc = await fetchLatestIntro();
-  if (!introDoc) { dbg("No global intro video"); return; }
-  const introSrc = pickSourcesFromDoc(introDoc);
+    // 🔹 Firestore-оос видеонуудыг татна
+    const introDoc = await fetchLatestIntro();
+    if (!introDoc) { dbg("No global intro video"); return; }
+    const introSrc = pickSourcesFromDoc(introDoc);
 
-  // --- Exercise-г өмнө нь GPS≈QR шалгаад л ачаална
-  let exDoc = null;
-  let exSrc = null;
-  let posNow = null;
-  let chk = null;
+    // --- Exercise-г өмнө нь GPS≈QR шалгаад л ачаална
+    let exDoc = null, exSrc = null, posNow = null, chk = null;
 
-  if (QR_LOC_ID) {
-    posNow = await getGeoOnce({ enableHighAccuracy:true, timeout: 12000 }).catch(() => null);
-    chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
-    if (chk.ok) {
-      exDoc = await fetchLatestExerciseFor(QR_LOC_ID);
-      if (exDoc) exSrc = pickSourcesFromDoc(exDoc);
+    if (QR_LOC_ID) {
+      posNow = await getGeoOnce({ enableHighAccuracy:true, timeout: 12000 }).catch(() => null);
+      chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
+      if (chk.ok) {
+        exDoc = await fetchLatestExerciseFor(QR_LOC_ID);
+        if (exDoc) exSrc = pickSourcesFromDoc(exDoc);
+      } else {
+        const name = chk?.loc?.name || QR_LOC_ID;
+        dbg(`Exercise locked: need to be near "${name}". dist=${Math.round(chk?.dist || -1)}m > allowed=${chk?.radius}+${Math.round(chk?.buffer||0)}m`);
+      }
     } else {
-      dbg(`Exercise locked: need to be near "${chk?.loc?.name || QR_LOC_ID}". dist=${Math.round(chk?.dist || -1)}m ≤ ${chk?.radius}m`);
+      dbg("QR loc not provided → exercise байхгүй");
     }
-  } else {
-    dbg("QR loc not provided → exercise байхгүй");
+
+    // Видеог бүрэн ачаалдтал нь хүлээнэ
+    await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4, isIOS);
+    if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, isIOS);
+
+    const texIntro = videoTexture(vIntro);
+    if (isIOS) {
+      vIntro.hidden = false;
+      vIntro.onloadedmetadata = () => fitPlaneToVideo(vIntro);
+      planeUseShader(texIntro);
+    } else {
+      planeUseMap(texIntro);
+      if (vIntro.readyState >= 1) fitPlaneToVideo(vIntro);
+      else vIntro.addEventListener("loadedmetadata", () => fitPlaneToVideo(vIntro), { once: true });
+    }
+
+    currentVideo = vIntro;
+
+    // Autoplay policy-д тааруулж эхлүүлэх
+    try { vIntro.muted = false; await safePlay(vIntro); btnUnmute.style.display = "none"; } catch {}
+    if (vIntro.paused) {
+      try { vIntro.muted = true; await safePlay(vIntro); btnUnmute.style.display = "inline-block"; } catch {}
+    }
+
+    applyScale();
+    dbg("intro playing");
+
+    // Интро явж байх хугацаанд GPS watch
+    try {
+      startGeoWatch((pos, err) => {
+        if (err) { dbg("GPS watch error: " + (err?.message || err)); return; }
+        dbg(fmtLoc(pos));
+      });
+    } catch (e) { dbg("GPS watch failed: " + (e?.message || e)); }
+
+    // Интро дуусмагц меню
+    vIntro.onended = () => {
+      try { ["ibExercise","ibGrowth","ibKnowledge"].forEach(id => document.getElementById(id)?.classList.add("mini")); } catch {}
+      showMenuOverlay();
+      dbg("intro ended → menu shown; intro buttons sticky.");
+    };
+  } finally {
+    introLoading = false;
   }
-
-  // Видеог бүрэн ачаалдтал нь хүлээнэ
-  await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4, isIOS);
-  if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, isIOS);
-
-  const texIntro = videoTexture(vIntro);
-  if (isIOS) {
-    vIntro.hidden = false;
-    vIntro.onloadedmetadata = () => fitPlaneToVideo(vIntro);
-    planeUseShader(texIntro);
-  } else {
-    planeUseMap(texIntro);
-    if (vIntro.readyState >= 1) fitPlaneToVideo(vIntro);
-    else vIntro.addEventListener("loadedmetadata", () => fitPlaneToVideo(vIntro), { once: true });
-  }
-
-  currentVideo = vIntro;
-
-  // Autoplay policy-д тааруулж эхлүүлэх
-  try {
-    vIntro.muted = false; await vIntro.play(); btnUnmute.style.display = "none";
-  } catch {
-    try { vIntro.muted = true; await vIntro.play(); btnUnmute.style.display = "inline-block"; }
-    catch (e) { if (!fromTap) { tapLay.style.display = "grid"; throw e; } }
-  }
-
-  applyScale();
-  dbg("intro playing");
-
-  // Интро явж байх хугацаанд GPS watch
-  try {
-    startGeoWatch((pos, err) => {
-      if (err) { dbg("GPS watch error: " + (err?.message || err)); return; }
-      dbg(fmtLoc(pos));
-    });
-  } catch (e) { dbg("GPS watch failed: " + (e?.message || e)); }
-
-  // Интро дуусмагц меню
-  vIntro.onended = () => {
-    try { ["ibExercise","ibGrowth","ibKnowledge"].forEach(id => document.getElementById(id)?.classList.add("mini")); } catch {}
-    showMenuOverlay();
-    dbg("intro ended → menu shown; intro buttons sticky.");
-  };
 }
 
+let exLoading = false;
 async function startExerciseDirect() {
-  closeMenu();
-  stopIntroButtons();
-  stopGeoWatch();
+  if (exLoading) return;
+  exLoading = true;
+  try {
+    closeMenu();
+    stopIntroButtons();
+    stopGeoWatch();
 
-  // Камер зөвшөөрөл
-  try { await ensureCamera(); }
-  catch (e) { dbg("camera start failed: " + (e?.message || e)); return; }
+    // Камер зөвшөөрөл
+    try { await ensureCamera(); }
+    catch (e) { dbg("camera start failed: " + (e?.message || e)); return; }
 
-  try { currentVideo?.pause?.(); } catch {}
+    try { currentVideo?.pause?.(); } catch {}
 
-  // Дахин GPS≈QR шалгана
-  const posNow = await getGeoOnce({ enableHighAccuracy:true, timeout:12000 }).catch(() => null);
-  const chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
-  if (!chk.ok) {
-    dbg(`Exercise locked: not within location. dist=${Math.round(chk?.dist || -1)}m ≤ ${chk?.radius}m`);
-    return;
+    // Дахин GPS≈QR шалгана
+    const posNow = await getGeoOnce({ enableHighAccuracy:true, timeout:12000 }).catch(() => null);
+    const chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
+    if (!chk.ok) {
+      dbg(`Exercise locked: not within location. dist=${Math.round(chk?.dist || -1)}m > allowed=${chk?.radius}+${Math.round(chk?.buffer||0)}m`);
+      return;
+    }
+
+    // Байршлын exercise-г Firestore-оос
+    const exDoc = await fetchLatestExerciseFor(QR_LOC_ID);
+    if (!exDoc) { dbg("No exercise video for this location"); return; }
+    const exSrc = pickSourcesFromDoc(exDoc);
+
+    await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, isIOS);
+    const texEx = videoTexture(vEx);
+    if (isIOS) planeUseShader(texEx); else planeUseMap(texEx);
+
+    if (vEx.readyState >= 1) fitPlaneToVideo(vEx);
+    else await new Promise((r) => vEx.addEventListener("loadedmetadata", () => { fitPlaneToVideo(vEx); r(); }, { once: true }));
+
+    vEx.currentTime = 0; currentVideo = vEx;
+
+    try { vEx.muted = false; await safePlay(vEx); btnUnmute.style.display = "none"; } catch {}
+    if (vEx.paused) {
+      try { vEx.muted = true; await safePlay(vEx); btnUnmute.style.display = "inline-block"; } catch {}
+    }
+
+    dbg("exercise playing (AR, no menu).");
+  } finally {
+    exLoading = false;
   }
-
-  // Байршлын exercise-г Firestore-оос
-  const exDoc = await fetchLatestExerciseFor(QR_LOC_ID);
-  if (!exDoc) { dbg("No exercise video for this location"); return; }
-  const exSrc = pickSourcesFromDoc(exDoc);
-
-  await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, isIOS);
-  const texEx = videoTexture(vEx);
-  if (isIOS) planeUseShader(texEx); else planeUseMap(texEx);
-
-  if (vEx.readyState >= 1) fitPlaneToVideo(vEx);
-  else await new Promise((r) => vEx.addEventListener("loadedmetadata", () => { fitPlaneToVideo(vEx); r(); }, { once: true }));
-
-  vEx.currentTime = 0; currentVideo = vEx;
-
-  try { vEx.muted = false; await vEx.play(); btnUnmute.style.display = "none"; }
-  catch { try { vEx.muted = true; await vEx.play(); btnUnmute.style.display = "inline-block"; } catch {} }
-
-  dbg("exercise playing (AR, no menu).");
 }
 
 /* ========= helpers (texture→material) ========= */
@@ -542,7 +566,7 @@ btnUnmute.addEventListener("click", async () => {
   try {
     if (!currentVideo) return;
     currentVideo.muted = false;
-    await currentVideo.play();
+    await safePlay(currentVideo);
     btnUnmute.style.display = "none";
   } catch { dbg("unmute failed"); }
 });
