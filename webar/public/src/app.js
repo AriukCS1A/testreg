@@ -224,14 +224,13 @@ function pickSourcesFromDoc(v) {
 }
 
 // Global intro (isGlobal == true), хамгийн сүүлийнх
+// Global intro: хамгийн идэвхтэй глобал нь ганцхан байна гэсэн дүрэмтэй байгаад limit(1)
 async function fetchLatestIntro() {
   const col = collection(db, "videos");
   const q = fsQuery(
     col,
     where("active", "==", true),
     where("isGlobal", "==", true),
-    // хүсвэл name=="intro" гэж нэмж шүүж болно
-    orderBy("uploadedAt", "desc"),
     limit(1)
   );
   const snap = await getDocs(q);
@@ -239,7 +238,7 @@ async function fetchLatestIntro() {
   return { id: snap.docs[0].id, ...snap.docs[0].data() };
 }
 
-// Байршлаар exercise (isGlobal == false && locationIds array-contains loc)
+// Байршлын exercise: uploadedAt/orderBy-гүй, зөвхөн шүүлтүүр + limit(1)
 async function fetchLatestExerciseFor(locationId) {
   if (!locationId) return null;
   const col = collection(db, "videos");
@@ -248,13 +247,14 @@ async function fetchLatestExerciseFor(locationId) {
     where("active", "==", true),
     where("isGlobal", "==", false),
     where("locationIds", "array-contains", locationId),
-    orderBy("uploadedAt", "desc"),
+    // Хэрвээ илүү найдвартай хүсвэл энд where("isCurrent","==",true) нэмэж болно
     limit(1)
   );
   const snap = await getDocs(q);
   if (snap.empty) return null;
   return { id: snap.docs[0].id, ...snap.docs[0].data() };
 }
+
 
 /* ========= Scan LOG ========= */
 async function logScan({ phone, loc, pos, ua, decision }) {
