@@ -1,42 +1,28 @@
 // src/app.js
-import {
-  INTRO_WEBM_URL,
-  INTRO_MP4_URL,
-  EXERCISE_WEBM_URL,
-  EXERCISE_MP4_URL,
-} from "./config.js";
 import { isIOS, dbg } from "./utils.js";
 import {
-  initAR,
-  ensureCamera,
-  onFrame,
-  videoTexture,
-  fitPlaneToVideo,
-  applyScale,
+  initAR, ensureCamera, onFrame,
+  videoTexture, fitPlaneToVideo, applyScale,
 } from "./ar.js";
 import {
-  bindIntroButtons,
-  updateIntroButtons,
-  showMenuOverlay,
-  closeMenu,
-  stopIntroButtons,
+  bindIntroButtons, updateIntroButtons,
+  showMenuOverlay, closeMenu, stopIntroButtons,
 } from "./ui.js";
 
 // ======= Тохиргоо =======
-const ALLOW_DUPLICATE_TO_ENTER = false; // давхардсан дугаар оруулсан үед AR руу оруулах эсэх
+const ALLOW_DUPLICATE_TO_ENTER = false; // давхар бүртгэлтэй дугаар ч орж болох эсэх
 
-// 🔗 Firebase (ESM CDN) + таны local config
+// 🔗 Firebase (ESM CDN) + local config
 import { firebaseConfig } from "./firebase.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getAuth,
-  signInAnonymously,
+  getAuth, signInAnonymously,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore,
-  doc,
-  setDoc,
-  serverTimestamp,
+  getFirestore, doc, setDoc, serverTimestamp,
+  // ↓ Firestore queries/collections
+  collection, addDoc, getDoc, getDocs,
+  query as fsQuery, where, orderBy, limit,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ========= Geolocation helpers ========= */
@@ -70,6 +56,13 @@ function fmtLoc(pos) {
   const { latitude, longitude, accuracy } = pos.coords || {};
   return `GPS: lat=${latitude?.toFixed(6)} lng=${longitude?.toFixed(6)} ±${Math.round(accuracy || 0)}m`;
 }
+
+/* ========= Query параметр ========= */
+function getQueryParam(name) {
+  const u = new URL(window.location.href);
+  return u.searchParams.get(name) || "";
+}
+const QR_LOC_ID = getQueryParam("loc") || "";  // QR-ээс ирсэн locationId
 
 /* ========= Phone normalize (MN) ========= */
 function normalizeMnPhone(raw = "") {
@@ -109,7 +102,7 @@ async function setSourcesAwait(v, webm, mp4, forceMp4 = false) {
 
   const ss = [];
   if (!forceMp4 && webm) { const s = document.createElement("source"); s.src = webm; s.type = "video/webm"; ss.push(s); }
-  if (mp4)                { const s = document.createElement("source"); s.src = mp4; s.type = "video/mp4"; ss.push(s); }
+  if (mp4)                { const s = document.createElement("source"); s.src = mp4;  s.type = "video/mp4";  ss.push(s); }
   ss.forEach((s) => v.appendChild(s));
 
   await new Promise((res, rej) => {
@@ -118,6 +111,76 @@ async function setSourcesAwait(v, webm, mp4, forceMp4 = false) {
     if (v.readyState >= 3) res();
     else v.addEventListener("canplay", () => res(), { once: true });
   });
+}
+
+/* ========= Firestore: видео татах ========= */
+// doc → {webm, mp4} сонголт гаргах
+function pickSourcesFromDoc(v) {
+  if (v?.url && v?.format) {
+    return {
+      webm: v.format === "webm" ? v.url : null,
+      mp4 : v.format === "mp4"  ? v.url : null,
+    };
+  }
+  if (v?.urls) return { webm: v.urls.webm || null, mp4: v.urls.mp4 || null };
+  return { webm: null, mp4: null };
+}
+
+// Global intro (isGlobal == true), хамгийн сүүлийнх
+async function fetchLatestIntro() {
+  const col = collection(db, "videos");
+  const q = fsQuery(
+    col,
+    where("active", "==", true),
+    where("isGlobal", "==", true),
+    // хүсвэл name=="intro" гэж нэмж шүүж болно
+    orderBy("uploadedAt", "desc"),
+    limit(1)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return null;
+  return { id: snap.docs[0].id, ...snap.docs[0].data() };
+}
+
+// Байршлаар exercise (isGlobal == false && locationIds array-contains loc)
+async function fetchLatestExerciseFor(locationId) {
+  if (!locationId) return null;
+  const col = collection(db, "videos");
+  const q = fsQuery(
+    col,
+    where("active", "==", true),
+    where("isGlobal", "==", false),
+    where("locationIds", "array-contains", locationId),
+    orderBy("uploadedAt", "desc"),
+    limit(1)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return null;
+  return { id: snap.docs[0].id, ...snap.docs[0].data() };
+}
+
+/* ========= Scan LOG ========= */
+async function logScan({ phone, loc, pos, ua }) {
+  try {
+    let locationName = null;
+    if (loc) {
+      const d = await getDoc(doc(db, "locations", loc)).catch(() => null);
+      if (d?.exists()) locationName = d.data()?.name || null;
+    }
+    await addDoc(collection(db, "scans"), {
+      phone,
+      locId: loc || null,
+      locationName: locationName || null,
+      lat: Number(pos?.coords?.latitude ?? null),
+      lng: Number(pos?.coords?.longitude ?? null),
+      accuracy: Number(pos?.coords?.accuracy ?? null),
+      ua: String(ua || "").slice(0, 1000),
+      source: "webar",
+      createdAt: serverTimestamp(),
+    });
+  } catch (e) {
+    console.warn("scan log failed:", e?.message || e);
+  }
 }
 
 /* ========= Phone gate (overlay form) ========= */
@@ -139,10 +202,10 @@ function showPhoneGate() {
       otpError.textContent = "";
       const phone = normalizeMnPhone(otpPhoneEl.value.trim());
 
-      // Anonymous sign-in (нэг удаа хангалттай)
+      // Anonymous sign-in
       if (!auth.currentUser) await signInAnonymously(auth).catch(() => {});
 
-      // 1) Байршлыг заавал авна
+      // 1) Байршлыг авах
       let loc;
       try {
         loc = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 });
@@ -155,15 +218,7 @@ function showPhoneGate() {
         return;
       }
 
-      // 2) Координатыг шалгана
-      const { latitude, longitude, accuracy } = loc.coords || {};
-      if (typeof latitude !== "number" || typeof longitude !== "number") {
-        otpError.textContent = "Байршил буруу байна. Дахин оролдоно уу.";
-        setTimeout(() => { otpError.textContent = ""; }, 3500);
-        return;
-      }
-
-      // 3) Firestore — doc ID = phone (давхардал барина)
+      // 2) phone_regs — НЭГ удаагийн бүртгэл
       try {
         await setDoc(
           doc(db, "phone_regs", phone),
@@ -172,20 +227,20 @@ function showPhoneGate() {
             source: "webar",
             createdAt: serverTimestamp(),
             ua: navigator.userAgent.slice(0, 1000),
-            lat: Number(latitude),
-            lng: Number(longitude),
-            accuracy: Number(accuracy ?? 0),
+            lat: Number(loc.coords.latitude),
+            lng: Number(loc.coords.longitude),
+            accuracy: Number(loc.coords.accuracy ?? 0),
+            qrId: QR_LOC_ID || null, // аль QR/байршлыг уншуулсан
           },
           { merge: false }
         );
       } catch (e) {
-        // Давхардсан үед update тооцогдоод rules-оор хориглоно → permission-denied
         if (e?.code === "permission-denied") {
+          // аль хэдийн бүртгэлтэй
           otpError.textContent = "Энэ дугаар аль хэдийн бүртгэлтэй байна.";
           setTimeout(() => { otpError.textContent = ""; }, 2200);
 
           if (ALLOW_DUPLICATE_TO_ENTER) {
-            // Давхардсан ч AR руу оруулна
             otpGate.hidden = true;
             otpPhoneEl.value = "";
             if (!window.__introStarted) {
@@ -193,12 +248,17 @@ function showPhoneGate() {
               await startIntroFlow(true);
             }
           }
+          // бүртгэл давхардуулсан ч доор scan-аа LOG хийж болно:
+          await logScan({ phone, loc: QR_LOC_ID, pos: loc, ua: navigator.userAgent });
           return;
         }
-        throw e; // бусад алдаа хэвийн урсгалаар гараг
+        throw e;
       }
 
-      // Амжилттай → form хааж AR эхлүүлнэ
+      // 3) Уншуулсан бүрийг LOG хийнэ
+      await logScan({ phone, loc: QR_LOC_ID, pos: loc, ua: navigator.userAgent });
+
+      // 4) Амжилттай → AR эхлүүлнэ
       otpGate.hidden = true;
       otpPhoneEl.value = "";
       if (!window.__introStarted) {
@@ -218,9 +278,7 @@ function showPhoneGate() {
 
 /* ========= main ========= */
 await initAR();
-
-// Урьдчилж anonymous оролдоно (заавал биш)
-signInAnonymously(auth).catch(() => {});
+signInAnonymously(auth).catch(() => {}); // optional
 
 // GPS нэг удаа авч debug-д
 try {
@@ -248,13 +306,22 @@ onFrame(() => { if (currentVideo === vIntro) updateIntroButtons(); });
 async function startIntroFlow(fromTap = false) {
   bindIntroButtons(vIntro);
 
-  // Камерын зөвшөөрөлгүй бол цааш үргэлжлүүлэхгүй
+  // Камерын зөвшөөрөл
   try { await ensureCamera(); }
   catch (e) { dbg("camera start failed: " + (e?.message || e)); return; }
 
-  // Видеог бүрэн ачаалдтал нь хүлээж байж texture үүсгэнэ
-  await setSourcesAwait(vIntro, INTRO_WEBM_URL, INTRO_MP4_URL, isIOS);
-  await setSourcesAwait(vEx,    EXERCISE_WEBM_URL, EXERCISE_MP4_URL, isIOS);
+  // 🔹 Firestore-оос видеонуудыг татна
+  const introDoc = await fetchLatestIntro();
+  if (!introDoc) { dbg("No global intro video"); return; }
+  const introSrc = pickSourcesFromDoc(introDoc);
+
+  const exDoc = await fetchLatestExerciseFor(QR_LOC_ID);
+  let exSrc = null;
+  if (exDoc) exSrc = pickSourcesFromDoc(exDoc);
+
+  // Видеог бүрэн ачаалдтал нь хүлээнэ
+  await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4, isIOS);
+  if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, isIOS);
 
   const texIntro = videoTexture(vIntro);
   if (isIOS) {
@@ -301,13 +368,18 @@ async function startExerciseDirect() {
   stopIntroButtons();
   stopGeoWatch();
 
-  // Камер зөвшөөрөлгүй бол үргэлжлүүлэхгүй
+  // Камер зөвшөөрөл
   try { await ensureCamera(); }
   catch (e) { dbg("camera start failed: " + (e?.message || e)); return; }
 
   try { currentVideo?.pause?.(); } catch {}
 
-  await setSourcesAwait(vEx, EXERCISE_WEBM_URL, EXERCISE_MP4_URL, isIOS);
+  // Байршлын exercise-г Firestore-оос
+  const exDoc = await fetchLatestExerciseFor(QR_LOC_ID);
+  if (!exDoc) { dbg("No exercise video for this location"); return; }
+  const exSrc = pickSourcesFromDoc(exDoc);
+
+  await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, isIOS);
   const texEx = videoTexture(vEx);
   if (isIOS) planeUseShader(texEx); else planeUseMap(texEx);
 
