@@ -11,6 +11,7 @@ import {
 
 // ======= Тохиргоо =======
 const ALLOW_DUPLICATE_TO_ENTER = false; // давхар бүртгэлтэй дугаар ч орж болох эсэх
+const DEFAULT_LOC_RADIUS_M = 200;       // QR байршил тойргийн default радиус (метр)
 
 // 🔗 Firebase (ESM CDN) + local config
 import { firebaseConfig } from "./firebase.js";
@@ -93,23 +94,119 @@ const fbApp = initializeApp(firebaseConfig);
 const auth  = getAuth(fbApp);
 const db    = getFirestore(fbApp);
 
-/* ========= Video sources – canplay хүртэл хүлээнэ ========= */
+/* ========= Location match helpers (NEW) ========= */
+async function fetchLocationById(id){
+  if (!id) return null;
+  const d = await getDoc(doc(db, "locations", id)).catch(() => null);
+  if (!d?.exists()) return null;
+  const { lat, lng, name, radiusMeters } = d.data() || {};
+  return {
+    id: d.id,
+    name: name || null,
+    lat: Number(lat),
+    lng: Number(lng),
+    radiusMeters: Number(radiusMeters || 0)
+  };
+}
+
+function distanceMeters(a, b){
+  const R = 6371000;
+  const toRad = (x)=> x*Math.PI/180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const la1 = toRad(a.lat), la2 = toRad(b.lat);
+  const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+async function isWithinQrLocation(pos, qrLocId, fallbackRadius=DEFAULT_LOC_RADIUS_M){
+  const loc = await fetchLocationById(qrLocId);
+  if (!loc || !pos?.coords) {
+    return { ok:false, reason: (!loc ? "loc-missing" : "gps-missing"), loc, dist:null, radius:fallbackRadius };
+  }
+  const user = { lat: Number(pos.coords.latitude), lng: Number(pos.coords.longitude) };
+  const dist = distanceMeters(user, { lat: loc.lat, lng: loc.lng });
+  const radius = loc.radiusMeters > 0 ? loc.radiusMeters : fallbackRadius;
+  return { ok: dist <= radius, reason: dist <= radius ? "ok" : "too-far", loc, dist, radius };
+}
+
+/* ========= Video: Sources + robust load ========= */
+// sources нэмж, canplay/error-г найдвартай сонсоно
 async function setSourcesAwait(v, webm, mp4, forceMp4 = false) {
   try { v.pause(); } catch {}
   v.removeAttribute("src");
   while (v.firstChild) v.removeChild(v.firstChild);
+
+  // autoplay-д бэлдэх (зарим Chrome-д muted property + attribute хоёулаа хэрэгтэй)
+  v.muted = true;
+  v.setAttribute("muted", "");
+  v.playsInline = true;
+  v.crossOrigin = "anonymous";
+  v.preload = "auto";
+
+  const pickMp4 = forceMp4 || !webm;
+  const first = pickMp4 ? mp4 : webm;
+  const firstType = pickMp4 ? "video/mp4" : "video/webm";
+  const alt = pickMp4 ? webm : mp4;
+  const altType = pickMp4 ? "video/webm" : "video/mp4";
+
+  const add = (url, type) => {
+    if (!url) return;
+    const s = document.createElement("source");
+    s.src = url; s.type = type;
+    v.appendChild(s);
+  };
+
+  add(first, firstType);
+  add(alt, altType); // fallback source
+
   v.load();
 
-  const ss = [];
-  if (!forceMp4 && webm) { const s = document.createElement("source"); s.src = webm; s.type = "video/webm"; ss.push(s); }
-  if (mp4)                { const s = document.createElement("source"); s.src = mp4;  s.type = "video/mp4";  ss.push(s); }
-  ss.forEach((s) => v.appendChild(s));
-
+  // canplay эсвэл error-г хүлээнэ
   await new Promise((res, rej) => {
-    const onErr = () => rej(new Error("video load failed"));
+    const to = setTimeout(() => rej(new Error("video load timeout")), 12000);
+    const onReady = () => { cleanup(); res(); };
+    const onErr = () => { cleanup(); rej(new Error("video load failed")); };
+    const cleanup = () => {
+      clearTimeout(to);
+      v.removeEventListener("canplay", onReady);
+      v.removeEventListener("loadeddata", onReady);
+      v.removeEventListener("error", onErr);
+      v.removeEventListener("stalled", onErr);
+      v.removeEventListener("abort", onErr);
+    };
+    v.addEventListener("canplay", onReady, { once: true });
+    v.addEventListener("loadeddata", onReady, { once: true });
     v.addEventListener("error", onErr, { once: true });
-    if (v.readyState >= 3) res();
-    else v.addEventListener("canplay", () => res(), { once: true });
+    v.addEventListener("stalled", onErr, { once: true });
+    v.addEventListener("abort", onErr, { once: true });
+  });
+}
+
+// Autoplay-г найдвартай эхлүүлэх utility
+async function tryPlayAutoplay(v, { showTap = true } = {}) {
+  try {
+    await v.play();
+    return true;
+  } catch {
+    if (showTap) {
+      tapLay.style.display = "grid";
+      const onTap = async () => {
+        tapLay.style.display = "none";
+        try { await v.play(); } catch {}
+        tapLay.removeEventListener("pointerdown", onTap);
+      };
+      tapLay.addEventListener("pointerdown", onTap, { once: true });
+    }
+    return false;
+  }
+}
+
+// Видео дебаг (шаардлагатай бол дуудаад лог хар)
+function wireVideoDebug(v, tag) {
+  const log = (ev) => dbg(`${tag}: ${ev.type}`);
+  ["loadedmetadata","canplay","play","playing","pause","waiting","stalled","error","ended"].forEach(t => {
+    v.addEventListener(t, log);
   });
 }
 
@@ -160,7 +257,7 @@ async function fetchLatestExerciseFor(locationId) {
 }
 
 /* ========= Scan LOG ========= */
-async function logScan({ phone, loc, pos, ua }) {
+async function logScan({ phone, loc, pos, ua, decision }) {
   try {
     let locationName = null;
     if (loc) {
@@ -174,6 +271,7 @@ async function logScan({ phone, loc, pos, ua }) {
       lat: Number(pos?.coords?.latitude ?? null),
       lng: Number(pos?.coords?.longitude ?? null),
       accuracy: Number(pos?.coords?.accuracy ?? null),
+      decision: decision || null, // { ok, dist, radius, reason }
       ua: String(ua || "").slice(0, 1000),
       source: "webar",
       createdAt: serverTimestamp(),
@@ -206,9 +304,9 @@ function showPhoneGate() {
       if (!auth.currentUser) await signInAnonymously(auth).catch(() => {});
 
       // 1) Байршлыг авах
-      let loc;
+      let pos;
       try {
-        loc = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 });
+        pos = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 });
       } catch (e) {
         otpError.textContent =
           e?.code === 1
@@ -227,9 +325,9 @@ function showPhoneGate() {
             source: "webar",
             createdAt: serverTimestamp(),
             ua: navigator.userAgent.slice(0, 1000),
-            lat: Number(loc.coords.latitude),
-            lng: Number(loc.coords.longitude),
-            accuracy: Number(loc.coords.accuracy ?? 0),
+            lat: Number(pos.coords.latitude),
+            lng: Number(pos.coords.longitude),
+            accuracy: Number(pos.coords.accuracy ?? 0),
             qrId: QR_LOC_ID || null, // аль QR/байршлыг уншуулсан
           },
           { merge: false }
@@ -249,14 +347,20 @@ function showPhoneGate() {
             }
           }
           // бүртгэл давхардуулсан ч доор scan-аа LOG хийж болно:
-          await logScan({ phone, loc: QR_LOC_ID, pos: loc, ua: navigator.userAgent });
+          const chkOld = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
+          await logScan({ phone, loc: QR_LOC_ID, pos, ua: navigator.userAgent, decision: {
+            ok: chkOld.ok, dist: Math.round(chkOld.dist || 0), radius: chkOld.radius, reason: chkOld.reason
+          }});
           return;
         }
         throw e;
       }
 
-      // 3) Уншуулсан бүрийг LOG хийнэ
-      await logScan({ phone, loc: QR_LOC_ID, pos: loc, ua: navigator.userAgent });
+      // 3) Уншуулсан бүрийг LOG хийнэ (+ decision)
+      const chk = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
+      await logScan({ phone, loc: QR_LOC_ID, pos, ua: navigator.userAgent, decision: {
+        ok: chk.ok, dist: Math.round(chk.dist || 0), radius: chk.radius, reason: chk.reason
+      }});
 
       // 4) Амжилттай → AR эхлүүлнэ
       otpGate.hidden = true;
@@ -315,9 +419,24 @@ async function startIntroFlow(fromTap = false) {
   if (!introDoc) { dbg("No global intro video"); return; }
   const introSrc = pickSourcesFromDoc(introDoc);
 
-  const exDoc = await fetchLatestExerciseFor(QR_LOC_ID);
+  // --- Exercise-г өмнө нь GPS≈QR шалгаад л ачаална
+  let exDoc = null;
   let exSrc = null;
-  if (exDoc) exSrc = pickSourcesFromDoc(exDoc);
+  let posNow = null;
+  let chk = null;
+
+  if (QR_LOC_ID) {
+    posNow = await getGeoOnce({ enableHighAccuracy:true, timeout: 12000 }).catch(() => null);
+    chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
+    if (chk.ok) {
+      exDoc = await fetchLatestExerciseFor(QR_LOC_ID);
+      if (exDoc) exSrc = pickSourcesFromDoc(exDoc);
+    } else {
+      dbg(`Exercise locked: need to be near "${chk?.loc?.name || QR_LOC_ID}". dist=${Math.round(chk?.dist || -1)}m ≤ ${chk?.radius}m`);
+    }
+  } else {
+    dbg("QR loc not provided → exercise байхгүй");
+  }
 
   // Видеог бүрэн ачаалдтал нь хүлээнэ
   await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4, isIOS);
@@ -373,6 +492,14 @@ async function startExerciseDirect() {
   catch (e) { dbg("camera start failed: " + (e?.message || e)); return; }
 
   try { currentVideo?.pause?.(); } catch {}
+
+  // Дахин GPS≈QR шалгана
+  const posNow = await getGeoOnce({ enableHighAccuracy:true, timeout:12000 }).catch(() => null);
+  const chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
+  if (!chk.ok) {
+    dbg(`Exercise locked: not within location. dist=${Math.round(chk?.dist || -1)}m ≤ ${chk?.radius}m`);
+    return;
+  }
 
   // Байршлын exercise-г Firestore-оос
   const exDoc = await fetchLatestExerciseFor(QR_LOC_ID);
