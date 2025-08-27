@@ -186,9 +186,18 @@ function pickSourcesFromDoc(v) {
 
 // Төхөөрөмжийн дэмжлэг шалгаад хамгийн зөв кандидат сонгох
 function pickBestForDevice({ webm, mp4 }) {
+<<<<<<< Updated upstream
   if (isIOS) {
     return { primary: mp4 ? { url: mp4, type: "video/mp4" } : null, fallback: null };
   }
+=======
+  // iOS/Safari → зөвхөн MP4 (alpha дэмждэггүй)
+  if (isIOS) {
+    return { primary: mp4 ? { url: mp4, type: "video/mp4" } : null, fallback: null };
+  }
+
+  // Android/Chrome → WEBM(VP8/VP9) эхний сонголт
+>>>>>>> Stashed changes
   const v = document.createElement("video");
   const can = (t) => (!!v.canPlayType && v.canPlayType(t).replace(/no/, ""));
   const webmOK = webm && (
@@ -243,8 +252,19 @@ async function setSourcesAwait(v, webm, mp4){
     dbg("VIDEO try:", c.type, c.url);
 
     return new Promise((resolve, reject) => {
+<<<<<<< Updated upstream
       const timeout = setTimeout(() => onErr(new Error("video load timeout")), 15000);
       const ok = () => { cleanup(); dbg("VIDEO ok:", c.type, "readyState", v.readyState); resolve(); };
+=======
+      const t = setTimeout(() => onErr(new Error("video load timeout")), 15000);
+      const ok = () => {
+        cleanup();
+        // 👇 Сонгосон mime/type-аа dataset-д хадгална
+        v.dataset.srcType = c.type;
+        dbg("VIDEO ok:", c.type, "ready", v.readyState);
+        resolve();
+      };
+>>>>>>> Stashed changes
       const onErr = (e) => { cleanup(); dbg("VIDEO fail:", c.type, e?.message||e); reject(e||new Error("video load failed")); };
       const cleanup = () => {
         clearTimeout(timeout);
@@ -441,8 +461,15 @@ tapLay.addEventListener("pointerdown", async ()=>{
 // Меню товч
 document.getElementById("mExercise")?.addEventListener("click", startExerciseDirect);
 
-// Интро үед world-tracked UI-г update
-onFrame(()=>{ if (currentVideo === vIntro) updateIntroButtons(); });
+// Интро үед world-tracked UI-г update + frame safeguard
+onFrame(()=>{
+  if (currentVideo === vIntro) updateIntroButtons();
+  // Видео кадрыг тогтвортой шинэчлэх (зарим GPU-д тус болдог)
+  const v = currentVideo;
+  if (v && v.readyState >= 2) {
+    try { v.__threeVideoTex && (v.__threeVideoTex.needsUpdate = true); } catch {}
+  }
+});
 
 /* ========= Flows ========= */
 let introLoading = false;
@@ -496,6 +523,7 @@ async function startIntroFlow(fromTap=false){
     await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4);
     if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4);
 
+<<<<<<< Updated upstream
     // canplay хойно texture→material
     await waitForCanPlay(vIntro);
     const texIntro = videoTexture(vIntro);
@@ -506,6 +534,21 @@ async function startIntroFlow(fromTap=false){
       planeUseMap(texIntro);
     }
     await fitAfterMetadata(vIntro);
+=======
+    // metadata хүртэл хүлээгээд texture үүсгэнэ
+    if (vIntro.readyState < 1) {
+      await new Promise(r => vIntro.addEventListener("loadedmetadata", r, { once:true }));
+    }
+    const texIntro = videoTexture(vIntro);
+    texIntro.needsUpdate = true;
+    vIntro.__threeVideoTex = texIntro;
+
+    const useShaderIntro = String(vIntro.dataset.srcType||"").includes("video/webm");
+    if (useShaderIntro) { planeUseShader(texIntro); }
+    else { planeUseMap(texIntro); }
+
+    fitPlaneToVideo(vIntro);
+>>>>>>> Stashed changes
 
     currentVideo = vIntro;
 
@@ -563,11 +606,25 @@ async function startExerciseDirect(){
 
     await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4);
 
+<<<<<<< Updated upstream
     await waitForCanPlay(vEx);
     const texEx = videoTexture(vEx);
     texEx.needsUpdate = true;
     if (isIOS) planeUseShader(texEx); else planeUseMap(texEx);
     await fitAfterMetadata(vEx);
+=======
+    if (vEx.readyState < 1) {
+      await new Promise(r => vEx.addEventListener("loadedmetadata", r, { once:true }));
+    }
+    const texEx = videoTexture(vEx);
+    texEx.needsUpdate = true;
+    vEx.__threeVideoTex = texEx;
+
+    const useShaderEx = String(vEx.dataset.srcType||"").includes("video/webm");
+    if (useShaderEx) planeUseShader(texEx); else planeUseMap(texEx);
+
+    fitPlaneToVideo(vEx);
+>>>>>>> Stashed changes
 
     vEx.currentTime = 0; currentVideo = vEx;
 
@@ -587,6 +644,7 @@ function planeUseMap(tex){
   import("./ar.js").then(({ plane }) => {
     plane.material.map = tex;
     plane.material.transparent = true;
+    plane.material.depthWrite = false;
     plane.material.needsUpdate = true;
   });
 }
@@ -594,6 +652,8 @@ function planeUseShader(tex){
   import("./ar.js").then(({ plane, makeSbsAlphaMaterial }) => {
     plane.material?.dispose?.();
     plane.material = makeSbsAlphaMaterial(tex);
+    plane.material.transparent = true;
+    plane.material.depthWrite = false;
     plane.material.needsUpdate = true;
   });
 }
