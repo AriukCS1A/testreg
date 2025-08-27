@@ -74,7 +74,7 @@ function getQueryParam(name){
   const u = new URL(window.location.href);
   return u.searchParams.get(name) || "";
 }
-const QR_LOC_ID = getQueryParam("loc") || "";  // QR-ээс ирсэн locationId
+const QR_LOC_ID = getQueryParam("loc") || "";
 dbg("QR loc =", QR_LOC_ID || "(none)");
 
 /* ========= Phone normalize (MN) ========= */
@@ -113,7 +113,6 @@ async function safePlay(v){
     else throw e;
   }
 }
-// Видеог ил (decode болохоор) боловч харагдахгүй байлгах
 function makeVideoDecodeFriendly(v){
   try {
     v.removeAttribute("hidden");
@@ -128,8 +127,7 @@ function makeVideoDecodeFriendly(v){
 let __camPromise = null;
 async function ensureCameraOnce() {
   if (__camPromise) return __camPromise;
-  __camPromise = ensureCamera()
-    .catch((e) => { __camPromise = null; throw e; });
+  __camPromise = ensureCamera().catch((e) => { __camPromise = null; throw e; });
   return __camPromise;
 }
 
@@ -172,9 +170,7 @@ function extFromUrl(u=""){ try{ return (new URL(u).pathname.match(/\.([a-z0-9]+)
 function pickSourcesFromDoc(v) {
   const url = v?.url || "";
   const fmt = normFormat(v?.format || "") || normFormat(extFromUrl(url));
-  if (url && fmt) {
-    return { webm: fmt==="webm" ? url : null, mp4: fmt==="mp4" ? url : null };
-  }
+  if (url && fmt) return { webm: fmt==="webm" ? url : null, mp4: fmt==="mp4" ? url : null };
   if (v?.urls) return { webm: v.urls.webm || null, mp4: v.urls.mp4 || null };
   if (url) {
     const ext = normFormat(extFromUrl(url));
@@ -186,18 +182,11 @@ function pickSourcesFromDoc(v) {
 
 // Төхөөрөмжийн дэмжлэг шалгаад хамгийн зөв кандидат сонгох
 function pickBestForDevice({ webm, mp4 }) {
-<<<<<<< Updated upstream
-  if (isIOS) {
-    return { primary: mp4 ? { url: mp4, type: "video/mp4" } : null, fallback: null };
-  }
-=======
   // iOS/Safari → зөвхөн MP4 (alpha дэмждэггүй)
   if (isIOS) {
     return { primary: mp4 ? { url: mp4, type: "video/mp4" } : null, fallback: null };
   }
-
   // Android/Chrome → WEBM(VP8/VP9) эхний сонголт
->>>>>>> Stashed changes
   const v = document.createElement("video");
   const can = (t) => (!!v.canPlayType && v.canPlayType(t).replace(/no/, ""));
   const webmOK = webm && (
@@ -210,18 +199,10 @@ function pickBestForDevice({ webm, mp4 }) {
     can('video/mp4; codecs="avc1.42E01E, mp4a.40.2"') ||
     can('video/mp4')
   );
-  if (webmOK) {
-    return {
-      primary:  { url: webm, type: "video/webm" },
-      fallback: mp4OK ? { url: mp4, type: "video/mp4" } : null
-    };
-  }
-  if (mp4OK) {
-    return { primary: { url: mp4, type: "video/mp4" }, fallback: null };
-  }
+  if (webmOK) return { primary:{ url:webm, type:"video/webm" }, fallback: mp4OK ? { url:mp4, type:"video/mp4" } : null };
+  if (mp4OK)  return { primary:{ url:mp4, type:"video/mp4" },  fallback:null };
   return {
-    primary: webm ? { url: webm, type: "video/webm" }
-                  : (mp4 ? { url: mp4, type: "video/mp4" } : null),
+    primary: webm ? { url:webm, type:"video/webm" } : (mp4 ? { url:mp4, type:"video/mp4" } : null),
     fallback: null
   };
 }
@@ -252,22 +233,16 @@ async function setSourcesAwait(v, webm, mp4){
     dbg("VIDEO try:", c.type, c.url);
 
     return new Promise((resolve, reject) => {
-<<<<<<< Updated upstream
-      const timeout = setTimeout(() => onErr(new Error("video load timeout")), 15000);
-      const ok = () => { cleanup(); dbg("VIDEO ok:", c.type, "readyState", v.readyState); resolve(); };
-=======
       const t = setTimeout(() => onErr(new Error("video load timeout")), 15000);
       const ok = () => {
         cleanup();
-        // 👇 Сонгосон mime/type-аа dataset-д хадгална
-        v.dataset.srcType = c.type;
+        v.dataset.srcType = c.type; // сонгосон төрөл
         dbg("VIDEO ok:", c.type, "ready", v.readyState);
         resolve();
       };
->>>>>>> Stashed changes
       const onErr = (e) => { cleanup(); dbg("VIDEO fail:", c.type, e?.message||e); reject(e||new Error("video load failed")); };
       const cleanup = () => {
-        clearTimeout(timeout);
+        clearTimeout(t);
         v.removeEventListener("canplay", ok);
         v.removeEventListener("loadeddata", ok);
         v.removeEventListener("error", onErr);
@@ -282,7 +257,6 @@ async function setSourcesAwait(v, webm, mp4){
       v.addEventListener("abort", onErr,  { once:true });
       s.addEventListener("error", onErr,  { once:true });
 
-      // аль хэдийн ready бол шууд resolve
       if (v.readyState >= 3) ok();
     });
   }
@@ -464,7 +438,6 @@ document.getElementById("mExercise")?.addEventListener("click", startExerciseDir
 // Интро үед world-tracked UI-г update + frame safeguard
 onFrame(()=>{
   if (currentVideo === vIntro) updateIntroButtons();
-  // Видео кадрыг тогтвортой шинэчлэх (зарим GPU-д тус болдог)
   const v = currentVideo;
   if (v && v.readyState >= 2) {
     try { v.__threeVideoTex && (v.__threeVideoTex.needsUpdate = true); } catch {}
@@ -483,18 +456,14 @@ async function startIntroFlow(fromTap=false){
     try { await ensureCameraOnce(); }
     catch (e) { dbg("camera start failed:", e?.message||e); return; }
 
-    // Intro (global from Firestore)
     const introDoc = await fetchLatestIntro();
     if (!introDoc) {
       dbg("No global intro video → try starting exercise directly");
       if (QR_LOC_ID) {
         const posNow = await getGeoOnce({ enableHighAccuracy:true, timeout:12000 }).catch(()=>null);
         const chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
-        if (chk.ok) {
-          await startExerciseDirect();
-        } else {
-          dbg(`Exercise locked: not within location. dist=${Math.round(chk?.dist||-1)} > allowed=${chk?.radius}+${Math.round(chk?.buffer||0)}`);
-        }
+        if (chk.ok) { await startExerciseDirect(); }
+        else       { dbg(`Exercise locked: not within location. dist=${Math.round(chk?.dist||-1)} > allowed=${chk?.radius}+${Math.round(chk?.buffer||0)}`); }
       }
       return;
     }
@@ -523,18 +492,6 @@ async function startIntroFlow(fromTap=false){
     await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4);
     if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4);
 
-<<<<<<< Updated upstream
-    // canplay хойно texture→material
-    await waitForCanPlay(vIntro);
-    const texIntro = videoTexture(vIntro);
-    texIntro.needsUpdate = true;
-    if (isIOS) {
-      planeUseShader(texIntro);
-    } else {
-      planeUseMap(texIntro);
-    }
-    await fitAfterMetadata(vIntro);
-=======
     // metadata хүртэл хүлээгээд texture үүсгэнэ
     if (vIntro.readyState < 1) {
       await new Promise(r => vIntro.addEventListener("loadedmetadata", r, { once:true }));
@@ -548,7 +505,6 @@ async function startIntroFlow(fromTap=false){
     else { planeUseMap(texIntro); }
 
     fitPlaneToVideo(vIntro);
->>>>>>> Stashed changes
 
     currentVideo = vIntro;
 
@@ -606,13 +562,6 @@ async function startExerciseDirect(){
 
     await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4);
 
-<<<<<<< Updated upstream
-    await waitForCanPlay(vEx);
-    const texEx = videoTexture(vEx);
-    texEx.needsUpdate = true;
-    if (isIOS) planeUseShader(texEx); else planeUseMap(texEx);
-    await fitAfterMetadata(vEx);
-=======
     if (vEx.readyState < 1) {
       await new Promise(r => vEx.addEventListener("loadedmetadata", r, { once:true }));
     }
@@ -624,7 +573,6 @@ async function startExerciseDirect(){
     if (useShaderEx) planeUseShader(texEx); else planeUseMap(texEx);
 
     fitPlaneToVideo(vEx);
->>>>>>> Stashed changes
 
     vEx.currentTime = 0; currentVideo = vEx;
 
@@ -656,17 +604,6 @@ function planeUseShader(tex){
     plane.material.depthWrite = false;
     plane.material.needsUpdate = true;
   });
-}
-function waitForCanPlay(v){
-  return new Promise((res)=>{
-    if (v.readyState >= 3) return res();
-    const done = ()=>{ v.removeEventListener("canplay", done); res(); };
-    v.addEventListener("canplay", done, { once:true });
-  });
-}
-async function fitAfterMetadata(v){
-  if (v.readyState >= 1) { fitPlaneToVideo(v); return; }
-  await new Promise(r=> v.addEventListener("loadedmetadata", ()=>{ fitPlaneToVideo(v); r(); }, { once:true }));
 }
 
 /* ========= Unmute ========= */
