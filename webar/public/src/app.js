@@ -160,52 +160,41 @@ async function isWithinQrLocation(pos, qrLocId, fallbackRadius=DEFAULT_LOC_RADIU
   return { ok, reason: ok?"ok":"too-far", loc, dist, radius, buffer };
 }
 
-/* ========= Format & source helpers ========= */
+/* ========= Format & source helpers (ЗӨВХӨН url + format) ========= */
 function cleanUrl(u=""){
   // илүү whitespace + эхэнд/төгсгөлд үлдсэн "…" эсвэл '…'-ийг цэвэрлэнэ
   u = String(u || "").trim().replace(/^['"]+|['"]+$/g, "");
   return u || null;
 }
-function normFormat(x){
-  const s = String(x||"").toLowerCase();
+function normFormat(x=""){
+  const s = String(x).toLowerCase();
   if (s.includes("webm")) return "webm";
   if (s.includes("mp4_sbs") || /sbs/.test(s)) return "mp4_sbs";
   if (s.includes("mp4"))  return "mp4";
   return s;
 }
 function extFromUrl(u=""){ try{ return (new URL(u).pathname.match(/\.([a-z0-9]+)$/i)?.[1]||"").toLowerCase(); }catch{ return ""; } }
+
+// Firestore-ийн баримт: { url, format }
 function pickSourcesFromDoc(doc) {
-  const urls = { webm:null, mp4_sbs:null, mp4:null };
+  const out = { webm:null, mp4_sbs:null, mp4:null };
 
-  // urls object байвал цэвэрлэж авна
-  if (doc?.urls && typeof doc.urls === "object") {
-    urls.webm    = cleanUrl(doc.urls.webm);
-    urls.mp4_sbs = cleanUrl(doc.urls.mp4_sbs);
-    urls.mp4     = cleanUrl(doc.urls.mp4);
-  }
-
-  // ганц url талбар байвал format-тай нь хамт задлана
   const url = cleanUrl(doc?.url);
   const fmt = normFormat(doc?.format || "") || normFormat(extFromUrl(url || ""));
 
   if (url) {
-    if (fmt === "webm") urls.webm = url;
-    else if (fmt === "mp4_sbs" || /_sbs\.(mp4|mov)$/i.test(url)) urls.mp4_sbs = url;
-    else if (fmt === "mp4") urls.mp4 = url;
+    if (fmt === "webm") out.webm = url;
+    else if (fmt === "mp4_sbs" || /_sbs\.(mp4|mov)$/i.test(url)) out.mp4_sbs = url;
+    else if (fmt === "mp4") out.mp4 = url;
     else {
-      const ext = normFormat(extFromUrl(url));
-      if (ext === "webm") urls.webm = url;
-      else if (ext === "mp4") urls.mp4 = url;
+      const ext = extFromUrl(url);
+      if (ext === "webm") out.webm = url;
+      else if (ext === "mp4") out.mp4 = url;
     }
   }
 
-  // хоосон стрингийг null болгох
-  if (!urls.webm)    urls.webm = null;
-  if (!urls.mp4_sbs) urls.mp4_sbs = null;
-  if (!urls.mp4)     urls.mp4 = null;
-
-  dbg("pickSources:", urls);
-  return urls; // {webm, mp4_sbs, mp4}
+  dbg("pickSources:", out);
+  return out; // {webm, mp4_sbs, mp4}
 }
 
 /* ===== Alpha төрлийг ялгах — SBS эсэх (fallback шалгалт) ===== */
@@ -214,7 +203,7 @@ function isSbsVideo(doc, vEl) {
   if (hint.includes("sbs")) return true;
   if (hint.includes("vp8")) return false;
 
-  const tagStr = (doc?.name || "") + " " + (doc?.url || "") + " " + JSON.stringify(doc?.urls||{});
+  const tagStr = (doc?.name || "") + " " + (doc?.url || "");
   if (/_sbs\b/i.test(tagStr)) return true;
 
   const w = vEl?.videoWidth || 0, h = vEl?.videoHeight || 0;
@@ -314,7 +303,7 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs){
 // Debug events
 function wireVideoDebug(v, tag){
   const log = (ev) => dbg(`[${tag}]`, ev.type, "t=", v.currentTime.toFixed(2));
-  ["loadedmetadata","canplay","play","playing","pause","waiting","stalled","error","ended"].forEach(t => {
+  ["loadedmetadata","canplay","play","playing","pause","waiting","stalled","error","ended","timeupdate"].forEach(t => {
     v.addEventListener(t, log);
   });
 }
