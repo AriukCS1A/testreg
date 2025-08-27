@@ -113,6 +113,16 @@ async function safePlay(v){
     else throw e;
   }
 }
+// Видеог ил (decode болохоор) боловч харагдахгүй байлгах
+function makeVideoDecodeFriendly(v){
+  try {
+    v.removeAttribute("hidden");
+    Object.assign(v.style, {
+      position: "fixed", left: "-9999px", top: "-9999px",
+      width: "1px", height: "1px", opacity: "0", pointerEvents: "none",
+    });
+  } catch {}
+}
 
 // ensureCamera() → once/cache
 let __camPromise = null;
@@ -135,7 +145,7 @@ function distanceMeters(a,b){
   const R=6371000, toRad=(x)=>x*Math.PI/180;
   const dLat=toRad(b.lat-a.lat), dLng=toRad(b.lng-a.lng);
   const la1=toRad(a.lat), la2=toRad(b.lat);
-  const h=Math.sin(dLat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
+  const h=Math.sin(dLat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(Math.abs(dLng)/2)**2;
   return 2*R*Math.asin(Math.sqrt(h));
 }
 async function isWithinQrLocation(pos, qrLocId, fallbackRadius=DEFAULT_LOC_RADIUS_M){
@@ -152,7 +162,6 @@ async function isWithinQrLocation(pos, qrLocId, fallbackRadius=DEFAULT_LOC_RADIU
 }
 
 /* ========= Format & source helpers ========= */
-// Doc → sources (format case-insensitive)
 function normFormat(x){
   const s = String(x||"").toLowerCase();
   if (s.includes("webm")) return "webm";
@@ -177,16 +186,13 @@ function pickSourcesFromDoc(v) {
 
 // Төхөөрөмжийн дэмжлэг шалгаад хамгийн зөв кандидат сонгох
 function pickBestForDevice({ webm, mp4 }) {
-  // iOS/Safari → зөвхөн MP4
   if (isIOS) {
     return { primary: mp4 ? { url: mp4, type: "video/mp4" } : null, fallback: null };
   }
-
-  // Android/Chrome → WEBM(VP8) эхний сонголт (opus/без codecs/ерөнхий)
   const v = document.createElement("video");
   const can = (t) => (!!v.canPlayType && v.canPlayType(t).replace(/no/, ""));
-
   const webmOK = webm && (
+    can('video/webm; codecs="vp9, opus"') ||
     can('video/webm; codecs="vp8, opus"') ||
     can('video/webm; codecs="vp8"') ||
     can('video/webm')
@@ -195,7 +201,6 @@ function pickBestForDevice({ webm, mp4 }) {
     can('video/mp4; codecs="avc1.42E01E, mp4a.40.2"') ||
     can('video/mp4')
   );
-
   if (webmOK) {
     return {
       primary:  { url: webm, type: "video/webm" },
@@ -205,7 +210,6 @@ function pickBestForDevice({ webm, mp4 }) {
   if (mp4OK) {
     return { primary: { url: mp4, type: "video/mp4" }, fallback: null };
   }
-  // хамгийн сүүлчийн найдвартай fallback
   return {
     primary: webm ? { url: webm, type: "video/webm" }
                   : (mp4 ? { url: mp4, type: "video/mp4" } : null),
@@ -224,6 +228,8 @@ async function setSourcesAwait(v, webm, mp4){
   v.crossOrigin = "anonymous";
   v.preload = "auto"; v.controls = false;
 
+  makeVideoDecodeFriendly(v);
+
   const choice = pickBestForDevice({ webm, mp4 });
   const candidates = [choice.primary, choice.fallback].filter(Boolean);
   if (!candidates.length) throw new Error("No playable sources for this device");
@@ -237,11 +243,11 @@ async function setSourcesAwait(v, webm, mp4){
     dbg("VIDEO try:", c.type, c.url);
 
     return new Promise((resolve, reject) => {
-      const t = setTimeout(() => onErr(new Error("video load timeout")), 15000);
-      const ok = () => { cleanup(); dbg("VIDEO ok:", c.type, "ready", v.readyState); resolve(); };
+      const timeout = setTimeout(() => onErr(new Error("video load timeout")), 15000);
+      const ok = () => { cleanup(); dbg("VIDEO ok:", c.type, "readyState", v.readyState); resolve(); };
       const onErr = (e) => { cleanup(); dbg("VIDEO fail:", c.type, e?.message||e); reject(e||new Error("video load failed")); };
       const cleanup = () => {
-        clearTimeout(t);
+        clearTimeout(timeout);
         v.removeEventListener("canplay", ok);
         v.removeEventListener("loadeddata", ok);
         v.removeEventListener("error", onErr);
@@ -255,6 +261,9 @@ async function setSourcesAwait(v, webm, mp4){
       v.addEventListener("stalled", onErr,{ once:true });
       v.addEventListener("abort", onErr,  { once:true });
       s.addEventListener("error", onErr,  { once:true });
+
+      // аль хэдийн ready бол шууд resolve
+      if (v.readyState >= 3) ok();
     });
   }
 
@@ -266,7 +275,7 @@ async function setSourcesAwait(v, webm, mp4){
   throw last || new Error("video load failed");
 }
 
-// Debug events (шаардлагатай бол дууд)
+// Debug events
 function wireVideoDebug(v, tag){
   const log = (ev) => dbg(`[${tag}]`, ev.type, "t=", v.currentTime.toFixed(2));
   ["loadedmetadata","canplay","play","playing","pause","waiting","stalled","error","ended"].forEach(t => {
@@ -276,20 +285,9 @@ function wireVideoDebug(v, tag){
 
 /* ========= Firestore queries ========= */
 async function fetchLatestIntro(){
-  // 1) isGlobal=true → 2) name=="intro" (fallback)
   const qs = [
-    fsQuery(
-      collection(db,"videos"),
-      where("active","==",true),
-      where("isGlobal","==",true),
-      limit(1)
-    ),
-    fsQuery(
-      collection(db,"videos"),
-      where("active","==",true),
-      where("name","==","intro"),
-      limit(1)
-    ),
+    fsQuery(collection(db,"videos"), where("active","==",true), where("isGlobal","==",true), limit(1)),
+    fsQuery(collection(db,"videos"), where("active","==",true), where("name","==","intro"), limit(1)),
   ];
   for (const q of qs) {
     const snap = await getDocs(q);
@@ -417,6 +415,10 @@ function showPhoneGate(){
 await initAR();
 signInAnonymously(auth).catch(()=>{});
 
+// Видео элементүүдийг decoding-д бэлэн болгоно
+makeVideoDecodeFriendly(vIntro);
+makeVideoDecodeFriendly(vEx);
+
 try {
   const pos = await getGeoOnce().catch(()=>null);
   if (pos) dbg("Boot pos:", fmtLoc(pos));
@@ -427,7 +429,6 @@ showPhoneGate();
 tapLay.addEventListener("pointerdown", async ()=>{
   tapLay.style.display = "none";
   try {
-    // loading үед play() дуудахгүй — эхлээд flow эхлүүлнэ
     if (!window.__introStarted) {
       window.__introStarted = true;
       await startIntroFlow(true);
@@ -495,16 +496,16 @@ async function startIntroFlow(fromTap=false){
     await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4);
     if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4);
 
+    // canplay хойно texture→material
+    await waitForCanPlay(vIntro);
     const texIntro = videoTexture(vIntro);
+    texIntro.needsUpdate = true;
     if (isIOS) {
-      vIntro.hidden = false;
-      vIntro.onloadedmetadata = () => fitPlaneToVideo(vIntro);
       planeUseShader(texIntro);
     } else {
       planeUseMap(texIntro);
-      if (vIntro.readyState >= 1) fitPlaneToVideo(vIntro);
-      else vIntro.addEventListener("loadedmetadata", ()=>fitPlaneToVideo(vIntro), { once:true });
     }
+    await fitAfterMetadata(vIntro);
 
     currentVideo = vIntro;
 
@@ -561,11 +562,12 @@ async function startExerciseDirect(){
     dbg("Exercise sources:", exSrc);
 
     await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4);
-    const texEx = videoTexture(vEx);
-    if (isIOS) planeUseShader(texEx); else planeUseMap(texEx);
 
-    if (vEx.readyState >= 1) fitPlaneToVideo(vEx);
-    else await new Promise((r)=> vEx.addEventListener("loadedmetadata", ()=>{ fitPlaneToVideo(vEx); r(); }, { once:true }));
+    await waitForCanPlay(vEx);
+    const texEx = videoTexture(vEx);
+    texEx.needsUpdate = true;
+    if (isIOS) planeUseShader(texEx); else planeUseMap(texEx);
+    await fitAfterMetadata(vEx);
 
     vEx.currentTime = 0; currentVideo = vEx;
 
@@ -594,6 +596,17 @@ function planeUseShader(tex){
     plane.material = makeSbsAlphaMaterial(tex);
     plane.material.needsUpdate = true;
   });
+}
+function waitForCanPlay(v){
+  return new Promise((res)=>{
+    if (v.readyState >= 3) return res();
+    const done = ()=>{ v.removeEventListener("canplay", done); res(); };
+    v.addEventListener("canplay", done, { once:true });
+  });
+}
+async function fitAfterMetadata(v){
+  if (v.readyState >= 1) { fitPlaneToVideo(v); return; }
+  await new Promise(r=> v.addEventListener("loadedmetadata", ()=>{ fitPlaneToVideo(v); r(); }, { once:true }));
 }
 
 /* ========= Unmute ========= */
