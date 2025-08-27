@@ -113,6 +113,7 @@ async function safePlay(v){
     else throw e;
   }
 }
+// Видеог decode болохоор боловч харагдахгүй байлгах
 function makeVideoDecodeFriendly(v){
   try {
     v.removeAttribute("hidden");
@@ -143,7 +144,7 @@ function distanceMeters(a,b){
   const R=6371000, toRad=(x)=>x*Math.PI/180;
   const dLat=toRad(b.lat-a.lat), dLng=toRad(b.lng-a.lng);
   const la1=toRad(a.lat), la2=toRad(b.lat);
-  const h=Math.sin(dLat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(Math.abs(dLng)/2)**2;
+  const h=Math.sin(dLat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
   return 2*R*Math.asin(Math.sqrt(h));
 }
 async function isWithinQrLocation(pos, qrLocId, fallbackRadius=DEFAULT_LOC_RADIUS_M){
@@ -178,6 +179,23 @@ function pickSourcesFromDoc(v) {
     if (ext==="mp4")  return { webm:null, mp4:url };
   }
   return { webm:null, mp4:null };
+}
+
+/* ===== Alpha төрлийг ялгах — SBS эсэх ===== */
+function isSbsVideo(doc, vEl) {
+  const hint = String(doc?.alphaMode || "").toLowerCase();
+  if (hint === "sbs") return true;
+  if (hint === "vp8a" || hint === "vp8" || hint === "alpha") return false;
+
+  const tagStr = (doc?.name || "") + " " + (doc?.url || "");
+  if (/_sbs\b/i.test(tagStr)) return true;
+
+  const w = vEl?.videoWidth || 0, h = vEl?.videoHeight || 0;
+  if (w && h) {
+    const r = w/h;
+    if (r > 1.9 && r < 2.1) return true; // ихэнх SBS 2:1
+  }
+  return false; // default → VP8a (дотоод alpha)
 }
 
 // Төхөөрөмжийн дэмжлэг шалгаад хамгийн зөв кандидат сонгох
@@ -234,12 +252,7 @@ async function setSourcesAwait(v, webm, mp4){
 
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => onErr(new Error("video load timeout")), 15000);
-      const ok = () => {
-        cleanup();
-        v.dataset.srcType = c.type; // сонгосон төрөл
-        dbg("VIDEO ok:", c.type, "ready", v.readyState);
-        resolve();
-      };
+      const ok = () => { cleanup(); v.dataset.srcType = c.type; dbg("VIDEO ok:", c.type, "ready", v.readyState); resolve(); };
       const onErr = (e) => { cleanup(); dbg("VIDEO fail:", c.type, e?.message||e); reject(e||new Error("video load failed")); };
       const cleanup = () => {
         clearTimeout(t);
@@ -256,7 +269,6 @@ async function setSourcesAwait(v, webm, mp4){
       v.addEventListener("stalled", onErr,{ once:true });
       v.addEventListener("abort", onErr,  { once:true });
       s.addEventListener("error", onErr,  { once:true });
-
       if (v.readyState >= 3) ok();
     });
   }
@@ -500,9 +512,9 @@ async function startIntroFlow(fromTap=false){
     texIntro.needsUpdate = true;
     vIntro.__threeVideoTex = texIntro;
 
-    const useShaderIntro = String(vIntro.dataset.srcType||"").includes("video/webm");
-    if (useShaderIntro) { planeUseShader(texIntro); }
-    else { planeUseMap(texIntro); }
+    // ✅ Android: VP8a → map, SBS → shader
+    if (isSbsVideo(introDoc, vIntro)) { planeUseShader(texIntro); }
+    else                              { planeUseMap(texIntro); }
 
     fitPlaneToVideo(vIntro);
 
@@ -569,8 +581,8 @@ async function startExerciseDirect(){
     texEx.needsUpdate = true;
     vEx.__threeVideoTex = texEx;
 
-    const useShaderEx = String(vEx.dataset.srcType||"").includes("video/webm");
-    if (useShaderEx) planeUseShader(texEx); else planeUseMap(texEx);
+    if (isSbsVideo(exDoc, vEx)) { planeUseShader(texEx); }
+    else                        { planeUseMap(texEx); }
 
     fitPlaneToVideo(vEx);
 
