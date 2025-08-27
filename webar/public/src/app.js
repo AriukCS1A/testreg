@@ -162,8 +162,9 @@ async function isWithinQrLocation(pos, qrLocId, fallbackRadius=DEFAULT_LOC_RADIU
 
 /* ========= Format & source helpers ========= */
 function cleanUrl(u=""){
-  u = String(u || "").trim();
-  return u.replace(/^"+|"+$/g, "");
+  // илүү whitespace + эхэнд/төгсгөлд үлдсэн "…" эсвэл '…'-ийг цэвэрлэнэ
+  u = String(u || "").trim().replace(/^['"]+|['"]+$/g, "");
+  return u || null;
 }
 function normFormat(x){
   const s = String(x||"").toLowerCase();
@@ -176,14 +177,16 @@ function extFromUrl(u=""){ try{ return (new URL(u).pathname.match(/\.([a-z0-9]+)
 function pickSourcesFromDoc(doc) {
   const urls = { webm:null, mp4_sbs:null, mp4:null };
 
+  // urls object байвал цэвэрлэж авна
   if (doc?.urls && typeof doc.urls === "object") {
     urls.webm    = cleanUrl(doc.urls.webm);
     urls.mp4_sbs = cleanUrl(doc.urls.mp4_sbs);
     urls.mp4     = cleanUrl(doc.urls.mp4);
   }
 
+  // ганц url талбар байвал format-тай нь хамт задлана
   const url = cleanUrl(doc?.url);
-  const fmt = normFormat(doc?.format || "") || normFormat(extFromUrl(url));
+  const fmt = normFormat(doc?.format || "") || normFormat(extFromUrl(url || ""));
 
   if (url) {
     if (fmt === "webm") urls.webm = url;
@@ -195,10 +198,17 @@ function pickSourcesFromDoc(doc) {
       else if (ext === "mp4") urls.mp4 = url;
     }
   }
+
+  // хоосон стрингийг null болгох
+  if (!urls.webm)    urls.webm = null;
+  if (!urls.mp4_sbs) urls.mp4_sbs = null;
+  if (!urls.mp4)     urls.mp4 = null;
+
+  dbg("pickSources:", urls);
   return urls; // {webm, mp4_sbs, mp4}
 }
 
-/* ===== Alpha төрлийг ялгах — SBS эсэх ===== */
+/* ===== Alpha төрлийг ялгах — SBS эсэх (fallback шалгалт) ===== */
 function isSbsVideo(doc, vEl) {
   const hint = String(doc?.alphaMode || doc?.format || "").toLowerCase();
   if (hint.includes("sbs")) return true;
@@ -239,7 +249,7 @@ function pickBestForDevice({ webm, mp4_sbs, mp4 }) {
     return list;
   }
   const list = [];
-  if (webmOK) list.push({ url:webm, type:"video/webm", kind:"alpha" });
+  if (webmOK) list.push({ url:webm, type:"video/webm", kind:"alpha" }); // VP8a
   if (sbsOK)  list.push({ url:mp4_sbs, type:"video/mp4", kind:"sbs" });
   if (mp4OK)  list.push({ url:mp4, type:"video/mp4", kind:"flat" });
   return list;
