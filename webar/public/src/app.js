@@ -166,17 +166,37 @@ function pickBestForDevice({ webm, mp4 }) {
   if (isIOS) {
     return { primary: mp4 ? { url: mp4, type: "video/mp4" } : null, fallback: null };
   }
-  // Android/Chrome → WEBM(VP8) эхний сонголт
-  const useWebm = webm && canPlay('video/webm; codecs="vp8, vorbis"');
-  if (useWebm) {
+
+  // Android/Chrome → WEBM(VP8) эхний сонголт (opus/без codecs/ерөнхий)
+  const v = document.createElement("video");
+  const can = (t) => (!!v.canPlayType && v.canPlayType(t).replace(/no/, ""));
+
+  const webmOK = webm && (
+    can('video/webm; codecs="vp8, opus"') ||
+    can('video/webm; codecs="vp8"') ||
+    can('video/webm')
+  );
+  const mp4OK  = mp4 && (
+    can('video/mp4; codecs="avc1.42E01E, mp4a.40.2"') ||
+    can('video/mp4')
+  );
+
+  if (webmOK) {
     return {
       primary:  { url: webm, type: "video/webm" },
-      fallback: mp4 ? { url: mp4, type: "video/mp4" } : null
+      fallback: mp4OK ? { url: mp4, type: "video/mp4" } : null
     };
   }
-  return { primary: mp4 ? { url: mp4, type: "video/mp4" } : null, fallback: null };
+  if (mp4OK) {
+    return { primary: { url: mp4, type: "video/mp4" }, fallback: null };
+  }
+  // хамгийн сүүлчийн найдвартай fallback
+  return {
+    primary: webm ? { url: webm, type: "video/webm" }
+                  : (mp4 ? { url: mp4, type: "video/mp4" } : null),
+    fallback: null
+  };
 }
-
 /* ========= Video: robust load (device-aware) ========= */
 async function setSourcesAwait(v, webm, mp4){
   try { v.pause(); } catch {}
@@ -240,17 +260,30 @@ function wireVideoDebug(v, tag){
 
 /* ========= Firestore queries ========= */
 async function fetchLatestIntro(){
-  const q = fsQuery(
-    collection(db,"videos"),
-    where("active","==",true),
-    where("isGlobal","==",true),
-    limit(1)
-  );
-  const snap = await getDocs(q);
-  if (snap.empty) return null;
-  const d = { id:snap.docs[0].id, ...snap.docs[0].data() };
-  dbg("Intro doc:", d.id, "format=", d.format, "url=", (d.url||"").slice(-32));
-  return d;
+  // 1) isGlobal=true → 2) name=="intro" (fallback)
+  const qs = [
+    fsQuery(
+      collection(db,"videos"),
+      where("active","==",true),
+      where("isGlobal","==",true),
+      limit(1)
+    ),
+    fsQuery(
+      collection(db,"videos"),
+      where("active","==",true),
+      where("name","==","intro"),
+      limit(1)
+    ),
+  ];
+  for (const q of qs) {
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const d = { id:snap.docs[0].id, ...snap.docs[0].data() };
+      dbg("Intro doc:", d.id, "format=", d.format, "url=", (d.url||"").slice(-32));
+      return d;
+    }
+  }
+  return null;
 }
 
 async function fetchLatestExerciseFor(locationId){
@@ -401,11 +434,23 @@ async function startIntroFlow(fromTap=false){
     try { await ensureCamera(); }
     catch (e) { dbg("camera start failed:", e?.message||e); return; }
 
-    // Intro (global from Firestore)
-    const introDoc = await fetchLatestIntro();
-    if (!introDoc) { dbg("No global intro video"); return; }
-    const introSrc = pickSourcesFromDoc(introDoc);
-    dbg("Intro sources:", introSrc);
+  // Intro (global from Firestore)
+const introDoc = await fetchLatestIntro();
+if (!introDoc) {
+  dbg("No global intro video → try starting exercise directly");
+  if (QR_LOC_ID) {
+    const posNow = await getGeoOnce({ enableHighAccuracy:true, timeout:12000 }).catch(()=>null);
+    const chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
+    if (chk.ok) {
+      await startExerciseDirect();
+    } else {
+      dbg(`Exercise locked: not within location. dist=${Math.round(chk?.dist||-1)} > allowed=${chk?.radius}+${Math.round(chk?.buffer||0)}`);
+    }
+  }
+  return;
+}
+const introSrc = pickSourcesFromDoc(introDoc);
+dbg("Intro sources:", introSrc);
 
     // Exercise prefetch (GPS≈QR)
     let exDoc=null, exSrc=null, posNow=null, chk=null;
