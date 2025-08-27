@@ -3,17 +3,17 @@ import { isIOS, dbg as _dbg } from "./utils.js";
 import {
   initAR, ensureCamera, onFrame,
   videoTexture, fitPlaneToVideo, applyScale,
-  // glCanvas  // three.js renderer canvas-аа ar.js-аас экспортолдог бол комментыг ав
+  // glCanvas
 } from "./ar.js";
 import {
   bindIntroButtons, updateIntroButtons,
   showMenuOverlay, closeMenu, stopIntroButtons,
 } from "./ui.js";
 
-// ------- dbg wrapper (prefix-тай) -------
+// ------- dbg wrapper -------
 const dbg = (...a) => _dbg ? _dbg("[AR]", ...a) : console.log("[AR]", ...a);
 
-// ==== Swallow "play() was interrupted by a new load request" globally ====
+// ==== Swallow "play() was interrupted..." ====
 window.addEventListener("unhandledrejection", (e) => {
   const r = e?.reason;
   const msg = String(r?.message || r || "");
@@ -23,7 +23,7 @@ window.addEventListener("unhandledrejection", (e) => {
   }
 });
 
-// ======= Тохиргоо =======
+// ======= Config =======
 const ALLOW_DUPLICATE_TO_ENTER = false;
 const DEFAULT_LOC_RADIUS_M = 200;
 const ACCURACY_BUFFER_MAX = 75;
@@ -112,33 +112,25 @@ const MEDIA_ERR = {
   3: "MEDIA_ERR_DECODE (decode failed/unsupported)",
   4: "MEDIA_ERR_SRC_NOT_SUPPORTED (src/type unsupported)"
 };
-function readReadyState(rs){
-  return `${rs} (${["HAVE_NOTHING","HAVE_METADATA","HAVE_CURRENT_DATA","HAVE_FUTURE_DATA","HAVE_ENOUGH_DATA"][rs]||"?"})`;
-}
-function readNetworkState(ns){
-  return `${ns} (${["NETWORK_EMPTY","NETWORK_IDLE","NETWORK_LOADING","NETWORK_NO_SOURCE"][ns]||"?"})`;
-}
+const readReadyState  = (rs)=>`${rs} (${["HAVE_NOTHING","HAVE_METADATA","HAVE_CURRENT_DATA","HAVE_FUTURE_DATA","HAVE_ENOUGH_DATA"][rs]||"?"})`;
+const readNetworkState= (ns)=>`${ns} (${["NETWORK_EMPTY","NETWORK_IDLE","NETWORK_LOADING","NETWORK_NO_SOURCE"][ns]||"?"})`;
 function logVideoError(v, tag="video"){
-  const e = v.error;
-  const code = e?.code ?? 0;
-  const msg  = MEDIA_ERR[code] || "Unknown media error";
-  const src  = v.currentSrc || v.src || "(no src)";
-  dbg(`[${tag}] VIDEO ERROR: code=${code} ${msg}`);
-  dbg(`[${tag}] src=${src}`);
+  const code = v?.error?.code ?? 0;
+  dbg(`[${tag}] VIDEO ERROR: code=${code} ${MEDIA_ERR[code]||"Unknown"}`);
+  dbg(`[${tag}] src=${v.currentSrc || v.src || "(no src)"}`);
   dbg(`[${tag}] readyState=${readReadyState(v.readyState)} networkState=${readNetworkState(v.networkState)}`);
   try {
+    const ct = v.dataset?.srcType || (v.currentSrc?.includes(".webm") ? 'video/webm; codecs="vp8,opus"' : 'video/mp4; codecs="avc1.42E01E,mp4a.40.2"');
     navigator.mediaCapabilities?.decodingInfo?.({
       type:"file",
-      audio:{contentType:"audio/aac"},
-      video:{contentType:v.dataset?.srcType||"video/webm", width:v.videoWidth||1920, height:v.videoHeight||1080, bitrate:5000000, framerate:30}
+      video:{ contentType:ct, width:v.videoWidth||640, height:v.videoHeight||360, bitrate:1_000_000, framerate:30 }
     }).then(info=>dbg(`[${tag}] mediaCapabilities: ${JSON.stringify(info)}`)).catch(()=>{});
   } catch {}
 }
-// Хэрэв ar.js-оос canvas экспортолдог бол идэвхжүүл
-// try { if (glCanvas) {
-//   glCanvas.addEventListener('webglcontextlost', ()=>dbg('[GL] webglcontextlost'), false);
-//   glCanvas.addEventListener('webglcontextrestored', ()=>dbg('[GL] webglcontextrestored'), false);
-// } } catch {}
+// if (glCanvas) {
+//   glCanvas.addEventListener("webglcontextlost", ()=>dbg("[GL] webglcontextlost"), false);
+//   glCanvas.addEventListener("webglcontextrestored", ()=>dbg("[GL] webglcontextrestored"), false);
+// }
 
 /* ========= helpers ========= */
 async function safePlay(v){
@@ -149,7 +141,7 @@ async function safePlay(v){
     else throw e;
   }
 }
-// Видеог decode болохоор боловч харагдахгүй байлгах
+// Decode-friendly (offscreen)
 function makeVideoDecodeFriendly(v){
   try {
     v.removeAttribute("hidden");
@@ -196,11 +188,8 @@ async function isWithinQrLocation(pos, qrLocId, fallbackRadius=DEFAULT_LOC_RADIU
   return { ok, reason: ok?"ok":"too-far", loc, dist, radius, buffer };
 }
 
-/* ========= Format & source helpers (ЗӨВХӨН url + format) ========= */
-function cleanUrl(u=""){
-  u = String(u || "").trim().replace(/^['"]+|['"]+$/g, "");
-  return u || null;
-}
+/* ========= Format & source helpers ========= */
+function cleanUrl(u=""){ return String(u||"").trim().replace(/^['"]+|['"]+$/g, "") || null; }
 function normFormat(x=""){
   const s = String(x).toLowerCase();
   if (s.includes("webm")) return "webm";
@@ -210,13 +199,11 @@ function normFormat(x=""){
 }
 function extFromUrl(u=""){ try{ return (new URL(u).pathname.match(/\.([a-z0-9]+)$/i)?.[1]||"").toLowerCase(); }catch{ return ""; } }
 
-// Firestore-ийн баримт: { url, format }
+// Firestore doc: { url, format }
 function pickSourcesFromDoc(doc) {
   const out = { webm:null, mp4_sbs:null, mp4:null };
-
   const url = cleanUrl(doc?.url);
   const fmt = normFormat(doc?.format || "") || normFormat(extFromUrl(url || ""));
-
   if (url) {
     if (fmt === "webm") out.webm = url;
     else if (fmt === "mp4_sbs" || /_sbs\.(mp4|mov)$/i.test(url)) out.mp4_sbs = url;
@@ -227,147 +214,145 @@ function pickSourcesFromDoc(doc) {
       else if (ext === "mp4") out.mp4 = url;
     }
   }
-
   dbg("pickSources:", out);
-  return out; // {webm, mp4_sbs, mp4}
+  return out;
 }
 
-/* ===== Alpha төрлийг ялгах — SBS эсэх (fallback шалгалт) ===== */
+/* ===== SBS эсэх ===== */
 function isSbsVideo(doc, vEl) {
   const hint = String(doc?.alphaMode || doc?.format || "").toLowerCase();
   if (hint.includes("sbs")) return true;
   if (hint.includes("vp8")) return false;
-
   const tagStr = (doc?.name || "") + " " + (doc?.url || "");
   if (/_sbs\b/i.test(tagStr)) return true;
-
   const w = vEl?.videoWidth || 0, h = vEl?.videoHeight || 0;
   if (w && h) {
     const r = w/h;
-    if (r > 1.9 && r < 2.1) return true; // ихэнх SBS 2:1
+    if (r > 1.9 && r < 2.1) return true;
   }
   return false;
 }
 
 // -------- Cloudinary seek hack ----------
 function isCloudinary(u){ try{ return /res\.cloudinary\.com/.test(new URL(u).host); }catch{ return false; } }
-function withSeekHack(u){
-  if (!u) return u;
-  return isCloudinary(u) ? (u + (u.includes("#") ? "" : "#t=0.001")) : u;
-}
+function withSeekHack(u){ if (!u) return u; return isCloudinary(u) ? (u + (u.includes("#") ? "" : "#t=0.001")) : u; }
 
-// Төхөөрөмжийн дэмжлэг шалгаад хамгийн зөв candidate жагсаалт
+// Candidates for device
 function pickBestForDevice({ webm, mp4_sbs, mp4 }) {
   const v = document.createElement("video");
   const can = (t) => (!!v.canPlayType && v.canPlayType(t).replace(/no/,''));
   const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 
-  const webmOK = webm && (can('video/webm; codecs="vp8"') || can('video/webm'));
+  const webmOK = webm && (can('video/webm; codecs="vp8,opus"') || can('video/webm'));
   const sbsOK  = mp4_sbs && can('video/mp4');
   const mp4OK  = mp4 && can('video/mp4');
 
   if (isiOS) {
     const list = [];
     if (sbsOK) list.push({ url: mp4_sbs, type: "video/mp4", kind:"sbs" });
-    if (mp4OK) list.push({ url: mp4, type: "video/mp4", kind:"flat" });
+    if (mp4OK) list.push({ url: mp4,     type: "video/mp4", kind:"flat" });
     return list;
   }
   const list = [];
-  if (webmOK) list.push({ url:webm, type:"video/webm", kind:"alpha" }); // VP8a
-  if (sbsOK)  list.push({ url:mp4_sbs, type:"video/mp4", kind:"sbs" });
-  if (mp4OK)  list.push({ url:mp4, type:"video/mp4", kind:"flat" });
+  if (webmOK) list.push({ url:webm,    type:"video/webm", kind:"alpha" });
+  if (sbsOK)  list.push({ url:mp4_sbs, type:"video/mp4",  kind:"sbs" });
+  if (mp4OK)  list.push({ url:mp4,     type:"video/mp4",  kind:"flat" });
   return list;
 }
 
-/* ========= Video: robust load (device-aware) ========= */
+/* ========= Robust video loader ========= */
 async function setSourcesAwait(v, webm, mp4, mp4_sbs){
-  try { v.pause(); } catch {}
+  try { v.pause?.(); } catch {}
   v.removeAttribute("src");
   while (v.firstChild) v.removeChild(v.firstChild);
 
   v.muted = true; v.setAttribute("muted","");
   v.playsInline = true;
   v.crossOrigin = "anonymous";
-  v.preload = "auto"; v.controls = false;
+  v.preload = "auto";
+  v.controls = false;
 
   makeVideoDecodeFriendly(v);
 
-  const candidates = pickBestForDevice({ webm, mp4_sbs, mp4 });
-  if (!candidates.length) throw new Error("No playable sources for this device");
+  const base = pickBestForDevice({ webm, mp4_sbs, mp4 });
+  if (!base.length) throw new Error("No playable sources for this device");
 
-  async function tryOneOnce(url, type){
+  // Build attempts: no-seek / seek × type sniff / typed
+  const attempts = [];
+  for (const c of base) {
+    const plain = { ...c, label: c.kind+"|no-seek|sniff", url: c.url, type:null };
+    const plainTyped = { ...c, label: c.kind+"|no-seek|typed", url:c.url, type:c.type };
+    const seek   = { ...c, label: c.kind+"|seek|sniff", url: withSeekHack(c.url), type:null };
+    const seekTyped = { ...c, label: c.kind+"|seek|typed", url: withSeekHack(c.url), type:c.type };
+    attempts.push(plain, plainTyped, seek, seekTyped);
+  }
+
+  function tryOnce({ url, type, label }){
     return new Promise((resolve, reject) => {
       const s = document.createElement("source");
       s.src = url;
-      s.type = type;
+      if (type) s.type = type;
+
       while (v.firstChild) v.removeChild(v.firstChild);
       v.appendChild(s);
       v.load();
 
-      const timer = setTimeout(()=>onErr(new Error("video load timeout")), 15000);
-      const ok = () => { cleanup(); v.dataset.srcType = type; dbg("VIDEO ok:", type, "ready", v.readyState); resolve(true); };
-      const onErr = (e) => { cleanup(); dbg("VIDEO fail-one:", type, e?.message||e); reject(e||new Error("video load failed")); };
-      const cleanup = () => {
-        clearTimeout(timer);
-        v.removeEventListener("canplay", ok);
-        v.removeEventListener("loadeddata", ok);
-        v.removeEventListener("error", onErr);
-        v.removeEventListener("stalled", onErr);
-        v.removeEventListener("abort", onErr);
-        s.removeEventListener("error", onErr);
+      const TIMEOUT_MS = 15000;
+      let done = false;
+
+      const finishOk  = () => { if (done) return; done=true; cleanup(); v.dataset.srcType = type || ""; dbg("VIDEO ok:", label, "rs=", v.readyState, "ns=", v.networkState); resolve(true); };
+      const finishErr = (why) => { if (done) return; done=true; cleanup(); dbg("VIDEO fail-one:", label, why); reject(new Error(why)); };
+
+      const to = setTimeout(()=>finishErr("timeout"), TIMEOUT_MS);
+
+      const onAbort = () => { dbg("VIDEO abort (ignore, keep waiting)"); /* ignore */ };
+      const onError = () => {
+        if (v.networkState === 3 && v.readyState === 0) finishErr("NETWORK_NO_SOURCE");
+        else finishErr("error");
       };
-      v.addEventListener("canplay", ok,   { once:true });
-      v.addEventListener("loadeddata", ok,{ once:true });
-      v.addEventListener("error", onErr,  { once:true });
-      v.addEventListener("stalled", onErr,{ once:true });
-      v.addEventListener("abort", onErr,  { once:true });
-      if (v.readyState >= 3) ok();
+      const onCanPlay = () => finishOk();
+      const onLoadedData = () => finishOk();
+      const onCanPlayThrough = () => finishOk();
+
+      const cleanup = () => {
+        clearTimeout(to);
+        v.removeEventListener("abort", onAbort);
+        v.removeEventListener("error", onError);
+        v.removeEventListener("stalled", onError);
+        v.removeEventListener("canplay", onCanPlay);
+        v.removeEventListener("canplaythrough", onCanPlayThrough);
+        v.removeEventListener("loadeddata", onLoadedData);
+        s.removeEventListener("error", onError);
+      };
+
+      v.addEventListener("abort", onAbort, { once:true });
+      v.addEventListener("error", onError, { once:true });
+      v.addEventListener("stalled", onError, { once:true });
+      v.addEventListener("canplay", onCanPlay, { once:true });
+      v.addEventListener("canplaythrough", onCanPlayThrough, { once:true });
+      v.addEventListener("loadeddata", onLoadedData, { once:true });
+      s.addEventListener("error", onError, { once:true });
+
+      dbg("VIDEO try:", label, url);
+      if (v.readyState >= 3) finishOk();
     });
   }
 
-  async function tryOneWithSeekFallback(c){
-    const withSeek = withSeekHack(c.url);
-    dbg("VIDEO try:", c.type, withSeek);
-    try { await tryOneOnce(withSeek, c.type); return c.kind; }
-    catch(err1){
-      dbg("VIDEO fail (with seek):", c.type, err1?.message||err1);
-      if (isCloudinary(c.url)) {
-        try {
-          dbg("VIDEO retry (no seek):", c.type, c.url);
-          await tryOneOnce(c.url, c.type);
-          return c.kind;
-        } catch(err2){
-          dbg("VIDEO fail (no seek):", c.type, err2?.message||err2);
-          throw err2;
-        }
-      }
-      throw err1;
-    }
-  }
-
-  let lastKind, lastErr;
-  for (const c of candidates) {
-    try {
-      lastKind = await tryOneWithSeekFallback(c);
-      break;
-    } catch(e){
+  let lastErr;
+  for (const a of attempts){
+    try { await tryOnce(a); return (a.type==="video/webm" ? "alpha" : (a.label.includes("sbs") ? "sbs" : "flat")); }
+    catch(e){
       logVideoError(v, "candidate");
       lastErr = e;
     }
   }
-  if (!lastKind) throw lastErr || new Error("video load failed");
-  return lastKind; // "alpha" | "sbs" | "flat"
+  throw lastErr || new Error("video load failed");
 }
 
 // Debug events
 function wireVideoDebug(v, tag){
-  const log = (ev) => dbg(
-    `[${tag}]`, ev.type,
-    "t=", (v.currentTime||0).toFixed(2),
-    "rs=", v.readyState,
-    "ns=", v.networkState
-  );
-  ["loadedmetadata","canplay","canplaythrough","play","playing","pause","waiting","stalled","ended","timeupdate"].forEach(t => {
+  const log = (ev) => dbg(`[${tag}]`, ev.type, "t=", (v.currentTime||0).toFixed(2), "rs=", v.readyState, "ns=", v.networkState);
+  ["loadstart","loadedmetadata","loadeddata","canplay","canplaythrough","play","playing","pause","waiting","stalled","suspend","abort","error","ended","timeupdate"].forEach(t => {
     v.addEventListener(t, log);
   });
   v.addEventListener("error", ()=> logVideoError(v, tag));
@@ -588,7 +573,7 @@ async function startIntroFlow(fromTap=false){
     const introKind = await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4, introSrc.mp4_sbs);
     if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, exSrc.mp4_sbs);
 
-    // metadata хүртэл хүлээгээд texture үүсгэнэ
+    // metadata хүртэл
     if (vIntro.readyState < 1) {
       await new Promise(r => vIntro.addEventListener("loadedmetadata", r, { once:true }));
     }
@@ -596,7 +581,6 @@ async function startIntroFlow(fromTap=false){
     texIntro.needsUpdate = true;
     vIntro.__threeVideoTex = texIntro;
 
-    // ✅ Android: VP8a → map, iOS/SBS → shader
     if (introKind === "sbs" || isSbsVideo(introDoc, vIntro)) { planeUseShader(texIntro); }
     else                                                      { planeUseMap(texIntro); }
 
