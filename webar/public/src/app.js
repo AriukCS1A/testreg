@@ -132,21 +132,53 @@ async function isWithinQrLocation(pos, qrLocId, fallbackRadius=DEFAULT_LOC_RADIU
   return { ok, reason: ok?"ok":"too-far", loc, dist, radius, buffer };
 }
 
-/* ========= Format helpers ========= */
+/* ========= Format & source helpers ========= */
+// Doc → sources (format case-insensitive)
 function normFormat(x){
-  const s = String(x||"").trim().toLowerCase();
+  const s = String(x||"").toLowerCase();
   if (s.includes("webm")) return "webm";
-  if (s.includes("mp4_sbs")) return "mp4_sbs";
-  if (s.includes("mp4")) return "mp4";
+  if (s.includes("mp4"))  return "mp4";
   return s;
 }
-function extFromUrl(url=""){
-  try { return (new URL(url).pathname.match(/\.([a-z0-9]+)$/i)?.[1]||"").toLowerCase(); }
-  catch { return ""; }
+function extFromUrl(u=""){ try{ return (new URL(u).pathname.match(/\.([a-z0-9]+)$/i)?.[1]||"").toLowerCase(); }catch{ return ""; } }
+function pickSourcesFromDoc(v) {
+  const url = v?.url || "";
+  const fmt = normFormat(v?.format || "") || normFormat(extFromUrl(url));
+  if (url && fmt) {
+    return { webm: fmt==="webm" ? url : null, mp4: fmt==="mp4" ? url : null };
+  }
+  if (v?.urls) return { webm: v.urls.webm || null, mp4: v.urls.mp4 || null };
+  if (url) {
+    const ext = normFormat(extFromUrl(url));
+    if (ext==="webm") return { webm:url, mp4:null };
+    if (ext==="mp4")  return { webm:null, mp4:url };
+  }
+  return { webm:null, mp4:null };
 }
 
-/* ========= Video: Sources + robust load ========= */
-async function setSourcesAwait(v, webm, mp4, forceMp4=false){
+// Төхөөрөмжийн дэмжлэг шалгаад хамгийн зөв кандидат сонгох
+function canPlay(type) {
+  const v = document.createElement("video");
+  return !!v.canPlayType && v.canPlayType(type).replace(/no/, "");
+}
+function pickBestForDevice({ webm, mp4 }) {
+  // iOS/Safari → зөвхөн MP4
+  if (isIOS) {
+    return { primary: mp4 ? { url: mp4, type: "video/mp4" } : null, fallback: null };
+  }
+  // Android/Chrome → WEBM(VP8) эхний сонголт
+  const useWebm = webm && canPlay('video/webm; codecs="vp8, vorbis"');
+  if (useWebm) {
+    return {
+      primary:  { url: webm, type: "video/webm" },
+      fallback: mp4 ? { url: mp4, type: "video/mp4" } : null
+    };
+  }
+  return { primary: mp4 ? { url: mp4, type: "video/mp4" } : null, fallback: null };
+}
+
+/* ========= Video: robust load (device-aware) ========= */
+async function setSourcesAwait(v, webm, mp4){
   try { v.pause(); } catch {}
   v.removeAttribute("src");
   while (v.firstChild) v.removeChild(v.firstChild);
@@ -156,29 +188,24 @@ async function setSourcesAwait(v, webm, mp4, forceMp4=false){
   v.crossOrigin = "anonymous";
   v.preload = "auto"; v.controls = false;
 
-  const candidates = [];
-  if (forceMp4) {
-    if (mp4) candidates.push({ url: mp4, type: "video/mp4" });
-  } else {
-    if (webm) candidates.push({ url: webm, type: "video/webm" });
-    if (mp4)  candidates.push({ url: mp4,  type: "video/mp4" });
-  }
-  if (!candidates.length) throw new Error("No playable sources");
+  const choice = pickBestForDevice({ webm, mp4 });
+  const candidates = [choice.primary, choice.fallback].filter(Boolean);
+  if (!candidates.length) throw new Error("No playable sources for this device");
 
   async function tryOne(c){
-    while (v.firstChild) v.removeChild(v.firstChild);
     const s = document.createElement("source");
     s.src = c.url; s.type = c.type;
+    while (v.firstChild) v.removeChild(v.firstChild);
     v.appendChild(s);
     v.load();
     dbg("VIDEO try:", c.type, c.url);
 
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => onErr(new Error("video load timeout")), 15000);
-      const ok = () => { cleanup(); dbg("VIDEO ok:", c.type, "readyState", v.readyState); resolve(); };
+      const t = setTimeout(() => onErr(new Error("video load timeout")), 15000);
+      const ok = () => { cleanup(); dbg("VIDEO ok:", c.type, "ready", v.readyState); resolve(); };
       const onErr = (e) => { cleanup(); dbg("VIDEO fail:", c.type, e?.message||e); reject(e||new Error("video load failed")); };
       const cleanup = () => {
-        clearTimeout(timer);
+        clearTimeout(t);
         v.removeEventListener("canplay", ok);
         v.removeEventListener("loadeddata", ok);
         v.removeEventListener("error", onErr);
@@ -198,7 +225,7 @@ async function setSourcesAwait(v, webm, mp4, forceMp4=false){
   let last;
   for (const c of candidates) {
     try { await tryOne(c); return; }
-    catch (e) { last = e; }
+    catch(e){ last = e; }
   }
   throw last || new Error("video load failed");
 }
@@ -209,27 +236,6 @@ function wireVideoDebug(v, tag){
   ["loadedmetadata","canplay","play","playing","pause","waiting","stalled","error","ended"].forEach(t => {
     v.addEventListener(t, log);
   });
-}
-
-/* ========= Firestore: doc → sources ========= */
-function pickSourcesFromDoc(v) {
-  const url = v?.url || "";
-  const fmt = normFormat(v?.format || "") || normFormat(extFromUrl(url));
-  if (url && fmt) {
-    return {
-      webm: fmt === "webm" ? url : null,
-      mp4 : (fmt === "mp4" || fmt === "mp4_sbs") ? url : null,
-    };
-  }
-  if (v?.urls && (v.urls.webm || v.urls.mp4)) {
-    return { webm: v.urls.webm || null, mp4: v.urls.mp4 || null };
-  }
-  if (url) {
-    const ext = normFormat(extFromUrl(url));
-    if (ext === "webm") return { webm:url, mp4:null };
-    if (ext === "mp4" || ext === "mp4_sbs") return { webm:null, mp4:url };
-  }
-  return { webm:null, mp4:null };
 }
 
 /* ========= Firestore queries ========= */
@@ -395,13 +401,13 @@ async function startIntroFlow(fromTap=false){
     try { await ensureCamera(); }
     catch (e) { dbg("camera start failed:", e?.message||e); return; }
 
-    // Intro
+    // Intro (global from Firestore)
     const introDoc = await fetchLatestIntro();
     if (!introDoc) { dbg("No global intro video"); return; }
     const introSrc = pickSourcesFromDoc(introDoc);
     dbg("Intro sources:", introSrc);
 
-    // Exercise prefetch (GPS near check)
+    // Exercise prefetch (GPS≈QR)
     let exDoc=null, exSrc=null, posNow=null, chk=null;
     if (QR_LOC_ID) {
       posNow = await getGeoOnce({ enableHighAccuracy:true, timeout:12000 }).catch(()=>null);
@@ -420,8 +426,8 @@ async function startIntroFlow(fromTap=false){
     }
 
     // Load intro (+prefetch exercise)
-    await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4, isIOS);
-    if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, isIOS);
+    await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4);
+    if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4);
 
     const texIntro = videoTexture(vIntro);
     if (isIOS) {
@@ -436,11 +442,9 @@ async function startIntroFlow(fromTap=false){
 
     currentVideo = vIntro;
 
-    try { vIntro.muted = false; await safePlay(vIntro); btnUnmute.style.display="none"; }
-    catch {}
+    try { vIntro.muted = false; await safePlay(vIntro); btnUnmute.style.display="none"; } catch {}
     if (vIntro.paused) {
-      try { vIntro.muted = true; await safePlay(vIntro); btnUnmute.style.display="inline-block"; }
-      catch {}
+      try { vIntro.muted = true; await safePlay(vIntro); btnUnmute.style.display="inline-block"; } catch {}
     }
 
     applyScale();
@@ -490,7 +494,7 @@ async function startExerciseDirect(){
     const exSrc = pickSourcesFromDoc(exDoc);
     dbg("Exercise sources:", exSrc);
 
-    await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, isIOS);
+    await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4);
     const texEx = videoTexture(vEx);
     if (isIOS) planeUseShader(texEx); else planeUseMap(texEx);
 
@@ -499,11 +503,9 @@ async function startExerciseDirect(){
 
     vEx.currentTime = 0; currentVideo = vEx;
 
-    try { vEx.muted = false; await safePlay(vEx); btnUnmute.style.display="none"; }
-    catch {}
+    try { vEx.muted = false; await safePlay(vEx); btnUnmute.style.display="none"; } catch {}
     if (vEx.paused) {
-      try { vEx.muted = true; await safePlay(vEx); btnUnmute.style.display="inline-block"; }
-      catch {}
+      try { vEx.muted = true; await safePlay(vEx); btnUnmute.style.display="inline-block"; } catch {}
     }
 
     dbg("exercise playing (AR, no menu).");
