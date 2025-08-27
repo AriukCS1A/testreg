@@ -161,33 +161,50 @@ async function isWithinQrLocation(pos, qrLocId, fallbackRadius=DEFAULT_LOC_RADIU
 }
 
 /* ========= Format & source helpers ========= */
+function cleanUrl(u=""){
+  u = String(u || "").trim();
+  return u.replace(/^"+|"+$/g, "");
+}
 function normFormat(x){
   const s = String(x||"").toLowerCase();
   if (s.includes("webm")) return "webm";
+  if (s.includes("mp4_sbs") || /sbs/.test(s)) return "mp4_sbs";
   if (s.includes("mp4"))  return "mp4";
   return s;
 }
 function extFromUrl(u=""){ try{ return (new URL(u).pathname.match(/\.([a-z0-9]+)$/i)?.[1]||"").toLowerCase(); }catch{ return ""; } }
-function pickSourcesFromDoc(v) {
-  const url = v?.url || "";
-  const fmt = normFormat(v?.format || "") || normFormat(extFromUrl(url));
-  if (url && fmt) return { webm: fmt==="webm" ? url : null, mp4: fmt==="mp4" ? url : null };
-  if (v?.urls) return { webm: v.urls.webm || null, mp4: v.urls.mp4 || null };
-  if (url) {
-    const ext = normFormat(extFromUrl(url));
-    if (ext==="webm") return { webm:url, mp4:null };
-    if (ext==="mp4")  return { webm:null, mp4:url };
+function pickSourcesFromDoc(doc) {
+  const urls = { webm:null, mp4_sbs:null, mp4:null };
+
+  if (doc?.urls && typeof doc.urls === "object") {
+    urls.webm    = cleanUrl(doc.urls.webm);
+    urls.mp4_sbs = cleanUrl(doc.urls.mp4_sbs);
+    urls.mp4     = cleanUrl(doc.urls.mp4);
   }
-  return { webm:null, mp4:null };
+
+  const url = cleanUrl(doc?.url);
+  const fmt = normFormat(doc?.format || "") || normFormat(extFromUrl(url));
+
+  if (url) {
+    if (fmt === "webm") urls.webm = url;
+    else if (fmt === "mp4_sbs" || /_sbs\.(mp4|mov)$/i.test(url)) urls.mp4_sbs = url;
+    else if (fmt === "mp4") urls.mp4 = url;
+    else {
+      const ext = normFormat(extFromUrl(url));
+      if (ext === "webm") urls.webm = url;
+      else if (ext === "mp4") urls.mp4 = url;
+    }
+  }
+  return urls; // {webm, mp4_sbs, mp4}
 }
 
 /* ===== Alpha төрлийг ялгах — SBS эсэх ===== */
 function isSbsVideo(doc, vEl) {
-  const hint = String(doc?.alphaMode || "").toLowerCase();
-  if (hint === "sbs") return true;
-  if (hint === "vp8a" || hint === "vp8" || hint === "alpha") return false;
+  const hint = String(doc?.alphaMode || doc?.format || "").toLowerCase();
+  if (hint.includes("sbs")) return true;
+  if (hint.includes("vp8")) return false;
 
-  const tagStr = (doc?.name || "") + " " + (doc?.url || "");
+  const tagStr = (doc?.name || "") + " " + (doc?.url || "") + " " + JSON.stringify(doc?.urls||{});
   if (/_sbs\b/i.test(tagStr)) return true;
 
   const w = vEl?.videoWidth || 0, h = vEl?.videoHeight || 0;
@@ -195,38 +212,41 @@ function isSbsVideo(doc, vEl) {
     const r = w/h;
     if (r > 1.9 && r < 2.1) return true; // ихэнх SBS 2:1
   }
-  return false; // default → VP8a (дотоод alpha)
+  return false;
 }
 
-// Төхөөрөмжийн дэмжлэг шалгаад хамгийн зөв кандидат сонгох
-function pickBestForDevice({ webm, mp4 }) {
-  // iOS/Safari → зөвхөн MP4 (alpha дэмждэггүй)
-  if (isIOS) {
-    return { primary: mp4 ? { url: mp4, type: "video/mp4" } : null, fallback: null };
-  }
-  // Android/Chrome → WEBM(VP8/VP9) эхний сонголт
+// -------- Cloudinary seek hack ----------
+function isCloudinary(u){ try{ return /res\.cloudinary\.com/.test(new URL(u).host); }catch{ return false; } }
+function withSeekHack(u){
+  if (!u) return u;
+  return isCloudinary(u) ? (u + (u.includes("#") ? "" : "#t=0.001")) : u;
+}
+
+// Төхөөрөмжийн дэмжлэг шалгаад хамгийн зөв candidate жагсаалт
+function pickBestForDevice({ webm, mp4_sbs, mp4 }) {
   const v = document.createElement("video");
-  const can = (t) => (!!v.canPlayType && v.canPlayType(t).replace(/no/, ""));
-  const webmOK = webm && (
-    can('video/webm; codecs="vp9, opus"') ||
-    can('video/webm; codecs="vp8, opus"') ||
-    can('video/webm; codecs="vp8"') ||
-    can('video/webm')
-  );
-  const mp4OK  = mp4 && (
-    can('video/mp4; codecs="avc1.42E01E, mp4a.40.2"') ||
-    can('video/mp4')
-  );
-  if (webmOK) return { primary:{ url:webm, type:"video/webm" }, fallback: mp4OK ? { url:mp4, type:"video/mp4" } : null };
-  if (mp4OK)  return { primary:{ url:mp4, type:"video/mp4" },  fallback:null };
-  return {
-    primary: webm ? { url:webm, type:"video/webm" } : (mp4 ? { url:mp4, type:"video/mp4" } : null),
-    fallback: null
-  };
+  const can = (t) => (!!v.canPlayType && v.canPlayType(t).replace(/no/,''));
+  const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+  const webmOK = webm && (can('video/webm; codecs="vp8"') || can('video/webm'));
+  const sbsOK  = mp4_sbs && can('video/mp4');
+  const mp4OK  = mp4 && can('video/mp4');
+
+  if (isiOS) {
+    const list = [];
+    if (sbsOK) list.push({ url: mp4_sbs, type: "video/mp4", kind:"sbs" });
+    if (mp4OK) list.push({ url: mp4, type: "video/mp4", kind:"flat" });
+    return list;
+  }
+  const list = [];
+  if (webmOK) list.push({ url:webm, type:"video/webm", kind:"alpha" });
+  if (sbsOK)  list.push({ url:mp4_sbs, type:"video/mp4", kind:"sbs" });
+  if (mp4OK)  list.push({ url:mp4, type:"video/mp4", kind:"flat" });
+  return list;
 }
 
 /* ========= Video: robust load (device-aware) ========= */
-async function setSourcesAwait(v, webm, mp4){
+async function setSourcesAwait(v, webm, mp4, mp4_sbs){
   try { v.pause(); } catch {}
   v.removeAttribute("src");
   while (v.firstChild) v.removeChild(v.firstChild);
@@ -238,21 +258,21 @@ async function setSourcesAwait(v, webm, mp4){
 
   makeVideoDecodeFriendly(v);
 
-  const choice = pickBestForDevice({ webm, mp4 });
-  const candidates = [choice.primary, choice.fallback].filter(Boolean);
+  const candidates = pickBestForDevice({ webm, mp4_sbs, mp4 });
   if (!candidates.length) throw new Error("No playable sources for this device");
 
   async function tryOne(c){
     const s = document.createElement("source");
-    s.src = c.url; s.type = c.type;
+    s.src = withSeekHack(c.url);
+    s.type = c.type;
     while (v.firstChild) v.removeChild(v.firstChild);
     v.appendChild(s);
     v.load();
-    dbg("VIDEO try:", c.type, c.url);
+    dbg("VIDEO try:", c.type, s.src);
 
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => onErr(new Error("video load timeout")), 15000);
-      const ok = () => { cleanup(); v.dataset.srcType = c.type; dbg("VIDEO ok:", c.type, "ready", v.readyState); resolve(); };
+      const ok = () => { cleanup(); v.dataset.srcType = c.type; v.dataset.alphaKind=c.kind; dbg("VIDEO ok:", c.type, "ready", v.readyState); resolve(c.kind); };
       const onErr = (e) => { cleanup(); dbg("VIDEO fail:", c.type, e?.message||e); reject(e||new Error("video load failed")); };
       const cleanup = () => {
         clearTimeout(t);
@@ -268,17 +288,17 @@ async function setSourcesAwait(v, webm, mp4){
       v.addEventListener("error", onErr,  { once:true });
       v.addEventListener("stalled", onErr,{ once:true });
       v.addEventListener("abort", onErr,  { once:true });
-      s.addEventListener("error", onErr,  { once:true });
       if (v.readyState >= 3) ok();
     });
   }
 
-  let last;
+  let lastKind, lastErr;
   for (const c of candidates) {
-    try { await tryOne(c); return; }
-    catch(e){ last = e; }
+    try { lastKind = await tryOne(c); break; }
+    catch(e){ lastErr = e; }
   }
-  throw last || new Error("video load failed");
+  if (!lastKind) throw lastErr || new Error("video load failed");
+  return lastKind; // "alpha" | "sbs" | "flat"
 }
 
 // Debug events
@@ -501,8 +521,8 @@ async function startIntroFlow(fromTap=false){
     }
 
     // Load intro (+prefetch exercise)
-    await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4);
-    if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4);
+    const introKind = await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4, introSrc.mp4_sbs);
+    if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, exSrc.mp4_sbs);
 
     // metadata хүртэл хүлээгээд texture үүсгэнэ
     if (vIntro.readyState < 1) {
@@ -512,9 +532,9 @@ async function startIntroFlow(fromTap=false){
     texIntro.needsUpdate = true;
     vIntro.__threeVideoTex = texIntro;
 
-    // ✅ Android: VP8a → map, SBS → shader
-    if (isSbsVideo(introDoc, vIntro)) { planeUseShader(texIntro); }
-    else                              { planeUseMap(texIntro); }
+    // ✅ Android: VP8a → map, iOS/SBS → shader
+    if (introKind === "sbs" || isSbsVideo(introDoc, vIntro)) { planeUseShader(texIntro); }
+    else                                                      { planeUseMap(texIntro); }
 
     fitPlaneToVideo(vIntro);
 
@@ -572,7 +592,7 @@ async function startExerciseDirect(){
     const exSrc = pickSourcesFromDoc(exDoc);
     dbg("Exercise sources:", exSrc);
 
-    await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4);
+    const exKind = await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, exSrc.mp4_sbs);
 
     if (vEx.readyState < 1) {
       await new Promise(r => vEx.addEventListener("loadedmetadata", r, { once:true }));
@@ -581,8 +601,8 @@ async function startExerciseDirect(){
     texEx.needsUpdate = true;
     vEx.__threeVideoTex = texEx;
 
-    if (isSbsVideo(exDoc, vEx)) { planeUseShader(texEx); }
-    else                        { planeUseMap(texEx); }
+    if (exKind === "sbs" || isSbsVideo(exDoc, vEx)) { planeUseShader(texEx); }
+    else                                            { planeUseMap(texEx); }
 
     fitPlaneToVideo(vEx);
 
