@@ -12,6 +12,16 @@ import {
 // ------- dbg wrapper (prefix-тай) -------
 const dbg = (...a) => _dbg ? _dbg("[AR]", ...a) : console.log("[AR]", ...a);
 
+// ==== Swallow "play() was interrupted by a new load request" globally ====
+window.addEventListener("unhandledrejection", (e) => {
+  const r = e?.reason;
+  const msg = String(r?.message || r || "");
+  if (r?.name === "AbortError" || /play\(\) request was interrupted/i.test(msg)) {
+    e.preventDefault();
+    dbg("Ignored AbortError from play():", msg);
+  }
+});
+
 // ======= Тохиргоо =======
 const ALLOW_DUPLICATE_TO_ENTER = false;
 const DEFAULT_LOC_RADIUS_M = 200;
@@ -104,6 +114,15 @@ async function safePlay(v){
   }
 }
 
+// ensureCamera() → once/cache
+let __camPromise = null;
+async function ensureCameraOnce() {
+  if (__camPromise) return __camPromise;
+  __camPromise = ensureCamera()
+    .catch((e) => { __camPromise = null; throw e; });
+  return __camPromise;
+}
+
 /* ========= Location match helpers ========= */
 async function fetchLocationById(id){
   if (!id) return null;
@@ -157,10 +176,6 @@ function pickSourcesFromDoc(v) {
 }
 
 // Төхөөрөмжийн дэмжлэг шалгаад хамгийн зөв кандидат сонгох
-function canPlay(type) {
-  const v = document.createElement("video");
-  return !!v.canPlayType && v.canPlayType(type).replace(/no/, "");
-}
 function pickBestForDevice({ webm, mp4 }) {
   // iOS/Safari → зөвхөн MP4
   if (isIOS) {
@@ -197,6 +212,7 @@ function pickBestForDevice({ webm, mp4 }) {
     fallback: null
   };
 }
+
 /* ========= Video: robust load (device-aware) ========= */
 async function setSourcesAwait(v, webm, mp4){
   try { v.pause(); } catch {}
@@ -233,12 +249,12 @@ async function setSourcesAwait(v, webm, mp4){
         v.removeEventListener("abort", onErr);
         s.removeEventListener("error", onErr);
       };
-      v.addEventListener("canplay", ok, { once:true });
-      v.addEventListener("loadeddata", ok, { once:true });
-      v.addEventListener("error", onErr, { once:true });
-      v.addEventListener("stalled", onErr, { once:true });
-      v.addEventListener("abort", onErr, { once:true });
-      s.addEventListener("error", onErr, { once:true });
+      v.addEventListener("canplay", ok,   { once:true });
+      v.addEventListener("loadeddata", ok,{ once:true });
+      v.addEventListener("error", onErr,  { once:true });
+      v.addEventListener("stalled", onErr,{ once:true });
+      v.addEventListener("abort", onErr,  { once:true });
+      s.addEventListener("error", onErr,  { once:true });
     });
   }
 
@@ -411,8 +427,13 @@ showPhoneGate();
 tapLay.addEventListener("pointerdown", async ()=>{
   tapLay.style.display = "none";
   try {
-    if (currentVideo) await safePlay(currentVideo);
-    else if (!window.__introStarted) { window.__introStarted = true; await startIntroFlow(true); }
+    // loading үед play() дуудахгүй — эхлээд flow эхлүүлнэ
+    if (!window.__introStarted) {
+      window.__introStarted = true;
+      await startIntroFlow(true);
+    } else if (!introLoading && currentVideo) {
+      await safePlay(currentVideo);
+    }
   } catch (e) { dbg("after tap failed:", e?.message||e); }
 });
 
@@ -431,26 +452,26 @@ async function startIntroFlow(fromTap=false){
     wireVideoDebug(vIntro, "intro");
     bindIntroButtons(vIntro);
 
-    try { await ensureCamera(); }
+    try { await ensureCameraOnce(); }
     catch (e) { dbg("camera start failed:", e?.message||e); return; }
 
-  // Intro (global from Firestore)
-const introDoc = await fetchLatestIntro();
-if (!introDoc) {
-  dbg("No global intro video → try starting exercise directly");
-  if (QR_LOC_ID) {
-    const posNow = await getGeoOnce({ enableHighAccuracy:true, timeout:12000 }).catch(()=>null);
-    const chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
-    if (chk.ok) {
-      await startExerciseDirect();
-    } else {
-      dbg(`Exercise locked: not within location. dist=${Math.round(chk?.dist||-1)} > allowed=${chk?.radius}+${Math.round(chk?.buffer||0)}`);
+    // Intro (global from Firestore)
+    const introDoc = await fetchLatestIntro();
+    if (!introDoc) {
+      dbg("No global intro video → try starting exercise directly");
+      if (QR_LOC_ID) {
+        const posNow = await getGeoOnce({ enableHighAccuracy:true, timeout:12000 }).catch(()=>null);
+        const chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
+        if (chk.ok) {
+          await startExerciseDirect();
+        } else {
+          dbg(`Exercise locked: not within location. dist=${Math.round(chk?.dist||-1)} > allowed=${chk?.radius}+${Math.round(chk?.buffer||0)}`);
+        }
+      }
+      return;
     }
-  }
-  return;
-}
-const introSrc = pickSourcesFromDoc(introDoc);
-dbg("Intro sources:", introSrc);
+    const introSrc = pickSourcesFromDoc(introDoc);
+    dbg("Intro sources:", introSrc);
 
     // Exercise prefetch (GPS≈QR)
     let exDoc=null, exSrc=null, posNow=null, chk=null;
@@ -520,7 +541,7 @@ async function startExerciseDirect(){
     wireVideoDebug(vEx, "exercise");
     closeMenu(); stopIntroButtons(); stopGeoWatch();
 
-    try { await ensureCamera(); }
+    try { await ensureCameraOnce(); }
     catch (e) { dbg("camera start failed:", e?.message||e); return; }
 
     try { currentVideo?.pause?.(); } catch {}
