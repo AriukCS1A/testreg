@@ -3,6 +3,7 @@ import { isIOS, dbg as _dbg } from "./utils.js";
 import {
   initAR, ensureCamera, onFrame,
   videoTexture, fitPlaneToVideo, applyScale,
+  // glCanvas  // three.js renderer canvas-аа ar.js-аас экспортолдог бол комментыг ав
 } from "./ar.js";
 import {
   bindIntroButtons, updateIntroButtons,
@@ -104,6 +105,41 @@ const fbApp = initializeApp(firebaseConfig);
 const auth  = getAuth(fbApp);
 const db    = getFirestore(fbApp);
 
+/* ========= Media / GL diagnostics ========= */
+const MEDIA_ERR = {
+  1: "MEDIA_ERR_ABORTED (user/JS aborted)",
+  2: "MEDIA_ERR_NETWORK (download/network)",
+  3: "MEDIA_ERR_DECODE (decode failed/unsupported)",
+  4: "MEDIA_ERR_SRC_NOT_SUPPORTED (src/type unsupported)"
+};
+function readReadyState(rs){
+  return `${rs} (${["HAVE_NOTHING","HAVE_METADATA","HAVE_CURRENT_DATA","HAVE_FUTURE_DATA","HAVE_ENOUGH_DATA"][rs]||"?"})`;
+}
+function readNetworkState(ns){
+  return `${ns} (${["NETWORK_EMPTY","NETWORK_IDLE","NETWORK_LOADING","NETWORK_NO_SOURCE"][ns]||"?"})`;
+}
+function logVideoError(v, tag="video"){
+  const e = v.error;
+  const code = e?.code ?? 0;
+  const msg  = MEDIA_ERR[code] || "Unknown media error";
+  const src  = v.currentSrc || v.src || "(no src)";
+  dbg(`[${tag}] VIDEO ERROR: code=${code} ${msg}`);
+  dbg(`[${tag}] src=${src}`);
+  dbg(`[${tag}] readyState=${readReadyState(v.readyState)} networkState=${readNetworkState(v.networkState)}`);
+  try {
+    navigator.mediaCapabilities?.decodingInfo?.({
+      type:"file",
+      audio:{contentType:"audio/aac"},
+      video:{contentType:v.dataset?.srcType||"video/webm", width:v.videoWidth||1920, height:v.videoHeight||1080, bitrate:5000000, framerate:30}
+    }).then(info=>dbg(`[${tag}] mediaCapabilities: ${JSON.stringify(info)}`)).catch(()=>{});
+  } catch {}
+}
+// Хэрэв ar.js-оос canvas экспортолдог бол идэвхжүүл
+// try { if (glCanvas) {
+//   glCanvas.addEventListener('webglcontextlost', ()=>dbg('[GL] webglcontextlost'), false);
+//   glCanvas.addEventListener('webglcontextrestored', ()=>dbg('[GL] webglcontextrestored'), false);
+// } } catch {}
+
 /* ========= helpers ========= */
 async function safePlay(v){
   if (!v) return;
@@ -162,7 +198,6 @@ async function isWithinQrLocation(pos, qrLocId, fallbackRadius=DEFAULT_LOC_RADIU
 
 /* ========= Format & source helpers (ЗӨВХӨН url + format) ========= */
 function cleanUrl(u=""){
-  // илүү whitespace + эхэнд/төгсгөлд үлдсэн "…" эсвэл '…'-ийг цэвэрлэнэ
   u = String(u || "").trim().replace(/^['"]+|['"]+$/g, "");
   return u || null;
 }
@@ -260,21 +295,20 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs){
   const candidates = pickBestForDevice({ webm, mp4_sbs, mp4 });
   if (!candidates.length) throw new Error("No playable sources for this device");
 
-  async function tryOne(c){
-    const s = document.createElement("source");
-    s.src = withSeekHack(c.url);
-    s.type = c.type;
-    while (v.firstChild) v.removeChild(v.firstChild);
-    v.appendChild(s);
-    v.load();
-    dbg("VIDEO try:", c.type, s.src);
-
+  async function tryOneOnce(url, type){
     return new Promise((resolve, reject) => {
-      const t = setTimeout(() => onErr(new Error("video load timeout")), 15000);
-      const ok = () => { cleanup(); v.dataset.srcType = c.type; v.dataset.alphaKind=c.kind; dbg("VIDEO ok:", c.type, "ready", v.readyState); resolve(c.kind); };
-      const onErr = (e) => { cleanup(); dbg("VIDEO fail:", c.type, e?.message||e); reject(e||new Error("video load failed")); };
+      const s = document.createElement("source");
+      s.src = url;
+      s.type = type;
+      while (v.firstChild) v.removeChild(v.firstChild);
+      v.appendChild(s);
+      v.load();
+
+      const timer = setTimeout(()=>onErr(new Error("video load timeout")), 15000);
+      const ok = () => { cleanup(); v.dataset.srcType = type; dbg("VIDEO ok:", type, "ready", v.readyState); resolve(true); };
+      const onErr = (e) => { cleanup(); dbg("VIDEO fail-one:", type, e?.message||e); reject(e||new Error("video load failed")); };
       const cleanup = () => {
-        clearTimeout(t);
+        clearTimeout(timer);
         v.removeEventListener("canplay", ok);
         v.removeEventListener("loadeddata", ok);
         v.removeEventListener("error", onErr);
@@ -291,10 +325,35 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs){
     });
   }
 
+  async function tryOneWithSeekFallback(c){
+    const withSeek = withSeekHack(c.url);
+    dbg("VIDEO try:", c.type, withSeek);
+    try { await tryOneOnce(withSeek, c.type); return c.kind; }
+    catch(err1){
+      dbg("VIDEO fail (with seek):", c.type, err1?.message||err1);
+      if (isCloudinary(c.url)) {
+        try {
+          dbg("VIDEO retry (no seek):", c.type, c.url);
+          await tryOneOnce(c.url, c.type);
+          return c.kind;
+        } catch(err2){
+          dbg("VIDEO fail (no seek):", c.type, err2?.message||err2);
+          throw err2;
+        }
+      }
+      throw err1;
+    }
+  }
+
   let lastKind, lastErr;
   for (const c of candidates) {
-    try { lastKind = await tryOne(c); break; }
-    catch(e){ lastErr = e; }
+    try {
+      lastKind = await tryOneWithSeekFallback(c);
+      break;
+    } catch(e){
+      logVideoError(v, "candidate");
+      lastErr = e;
+    }
   }
   if (!lastKind) throw lastErr || new Error("video load failed");
   return lastKind; // "alpha" | "sbs" | "flat"
@@ -302,10 +361,16 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs){
 
 // Debug events
 function wireVideoDebug(v, tag){
-  const log = (ev) => dbg(`[${tag}]`, ev.type, "t=", v.currentTime.toFixed(2));
-  ["loadedmetadata","canplay","play","playing","pause","waiting","stalled","error","ended","timeupdate"].forEach(t => {
+  const log = (ev) => dbg(
+    `[${tag}]`, ev.type,
+    "t=", (v.currentTime||0).toFixed(2),
+    "rs=", v.readyState,
+    "ns=", v.networkState
+  );
+  ["loadedmetadata","canplay","canplaythrough","play","playing","pause","waiting","stalled","ended","timeupdate"].forEach(t => {
     v.addEventListener(t, log);
   });
+  v.addEventListener("error", ()=> logVideoError(v, tag));
 }
 
 /* ========= Firestore queries ========= */
