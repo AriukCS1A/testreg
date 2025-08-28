@@ -22,14 +22,16 @@ export async function initAR() {
     throw new Error("browser incompatible");
   }
 
-  // Renderer
+  // Renderer (✓ transparent canvas)
   renderer = new THREE.WebGLRenderer({
     antialias: true,
-    alpha: false,
+    alpha: true, // 🔸 ил тод canvas
     powerPreference: "high-performance",
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(innerWidth, innerHeight);
+  renderer.setClearColor(0x000000, 0); // 🔸 ар талыг 0 alpha
+  renderer.domElement.style.background = "transparent";
   renderer.domElement.classList.add("webgl");
   document.body.appendChild(renderer.domElement);
 
@@ -44,7 +46,7 @@ export async function initAR() {
   // Camera / Scene
   camera = new ZT.Camera({ userFacing: false });
   scene = new THREE.Scene();
-  scene.background = camera.backgroundTexture;
+  scene.background = camera.backgroundTexture; // Zappar-ийн камер feed
 
   // World tracking
   tracker = new ZT.InstantWorldTracker();
@@ -87,9 +89,13 @@ export async function initAR() {
   gl.canvas.addEventListener("webglcontextrestored", () => {
     ZT.glContextSet(renderer.getContext());
     scene.background = camera.backgroundTexture;
+    renderer.setClearColor(0x000000, 0); // 🔸 restore үед ч мөн
     if (cameraStarted) { try { camera.start(); } catch {} }
     dbg("webgl context RESTORED + camera restarted");
   });
+
+  // ✋ жестүүд
+  hookGestures();
 
   dbg("AR ready");
 }
@@ -215,7 +221,7 @@ export function makeSbsAlphaMaterial(tex) {
 
 // Luma-key fallback (альфа байхгүй MP4-д)
 export function makeLumaKeyMaterial(tex, { cut = 0.22, feather = 0.12 } = {}) {
-  tex.colorSpace = THREE.SRGBColorSpace; // ✅ зөв
+  tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.minFilter = THREE.LinearFilter;
   tex.magFilter = THREE.LinearFilter;

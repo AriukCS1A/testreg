@@ -191,9 +191,8 @@ async function videoLooksOpaque(v) {
     for (let i = 3; i < a.length; i += 4) if (a[i] < minA) minA = a[i];
     return (minA > 250);
   } catch {
-    // Canvas CORS / decode алдаа → урьд нь true буцааж flat руу унагаж байсан.
-    // WEBM-alpha дээр буруу уналт хийдэг тул эндээс false буцаая.
-    return false;
+    // Шинжлэх боломжгүй (CORS/decoder) үед аюулгүй тал руугаа → OPAQUE гэж үзнэ.
+    return true;
   }
 }
 
@@ -731,12 +730,10 @@ async function startIntroFlow(fromTap=false){
     texIntro.needsUpdate = true;
     vIntro.__threeVideoTex = texIntro;
 
-    // ✅ WEBM-alpha бол шууд итгэнэ, MP4-alpha үед л opaque эсэхийг шалгана
+    // ✅ ЯМАР ч тохиолдолд opaque sniff заавал хийнэ
     let useIntroKind = introKind;
-    const introExt = (vIntro.currentSrc && vIntro.currentSrc.split(".").pop()?.toLowerCase()) || "";
-    if (useIntroKind === "alpha" && introExt !== "webm") {
-      if (await videoLooksOpaque(vIntro)) useIntroKind = "flat";
-    }
+    const looksOpaqueIntro = await videoLooksOpaque(vIntro);
+    if (looksOpaqueIntro && useIntroKind === "alpha") useIntroKind = "flat";
 
     if (useIntroKind === "sbs" || isSbsVideo(introDoc, vIntro)) {
       planeUseShader(texIntro);
@@ -745,7 +742,7 @@ async function startIntroFlow(fromTap=false){
       planeUseMap(texIntro);
     } else {
       // Альфа байхгүй → лума кей
-      planeUseLumaKey(texIntro, { cut:0.22, feather:0.12 });
+      planeUseLumaKey(texIntro, { cut: 0.12, feather: 0.10 });
     }
 
     fitPlaneToVideo(vIntro);
@@ -813,18 +810,17 @@ async function startExerciseDirect(){
     texEx.needsUpdate = true;
     vEx.__threeVideoTex = texEx;
 
+    // ✅ ЯМАР ч тохиолдолд opaque sniff заавал хийнэ
     let useExKind = exKind;
-    const exExt = (vEx.currentSrc && vEx.currentSrc.split(".").pop()?.toLowerCase()) || "";
-    if (useExKind === "alpha" && exExt !== "webm") {
-      if (await videoLooksOpaque(vEx)) useExKind = "flat";
-    }
+    const looksOpaqueEx = await videoLooksOpaque(vEx);
+    if (looksOpaqueEx && useExKind === "alpha") useExKind = "flat";
 
     if (useExKind === "sbs" || isSbsVideo(exDoc, vEx)) {
       planeUseShader(texEx);
     } else if (useExKind === "alpha") {
       planeUseMap(texEx);
     } else {
-      planeUseLumaKey(texEx, { cut:0.22, feather:0.12 });
+      planeUseLumaKey(texEx, { cut: 0.12, feather: 0.10 });
     }
 
     fitPlaneToVideo(vEx);
