@@ -675,6 +675,28 @@ onFrame(()=>{
   }
 });
 
+/* ========= Plane visibility helpers (anti-white-flash) ========= */
+function hidePlane(){
+  import("./ar.js").then(({ plane }) => {
+    if (!plane) return;
+    plane.visible = false;
+    // framebuffer руу түр зурж болохгүй — флаш бүр ч дарна
+    if (plane.material) plane.material.colorWrite = false;
+  });
+}
+async function revealPlaneWhenReady(v){
+  try {
+    await waitReady(v, 2); // HAVE_CURRENT_DATA
+    // Декодлогдсон фрэйм texture-т очихыг 2 RAF-ээр баталгаажуулна
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  } catch {}
+  import("./ar.js").then(({ plane }) => {
+    if (!plane) return;
+    if (plane.material) plane.material.colorWrite = true;
+    plane.visible = true;
+  });
+}
+
 /* ========= Flows ========= */
 let introLoading = false;
 async function startIntroFlow(fromTap=false){
@@ -730,6 +752,9 @@ async function startIntroFlow(fromTap=false){
     texIntro.needsUpdate = true;
     vIntro.__threeVideoTex = texIntro;
 
+    // ✅ plane-г хамгийн түрүүнд нууж авна (цагаан флаш дарах)
+    hidePlane();
+
     // ✅ ЯМАР ч тохиолдолд opaque sniff заавал хийнэ
     let useIntroKind = introKind;
     const looksOpaqueIntro = await videoLooksOpaque(vIntro);
@@ -756,6 +781,9 @@ async function startIntroFlow(fromTap=false){
 
     applyScale();
     dbg("intro playing…");
+
+    // ✅ анхны фрэйм decode болсны дараа л plane-г ил болгож зурна
+    await revealPlaneWhenReady(vIntro);
 
     try {
       startGeoWatch((pos, err)=>{
@@ -810,6 +838,9 @@ async function startExerciseDirect(){
     texEx.needsUpdate = true;
     vEx.__threeVideoTex = texEx;
 
+    // ✅ plane-г нууж авна (цагаан флаш дарах)
+    hidePlane();
+
     // ✅ ЯМАР ч тохиолдолд opaque sniff заавал хийнэ
     let useExKind = exKind;
     const looksOpaqueEx = await videoLooksOpaque(vEx);
@@ -831,6 +862,9 @@ async function startExerciseDirect(){
     if (vEx.paused) {
       try { vEx.muted = true; await safePlay(vEx); btnUnmute.style.display="inline-block"; } catch {}
     }
+
+    // ✅ анхны фрэйм бэлэн болмогц л ил болгоно
+    await revealPlaneWhenReady(vEx);
 
     dbg("exercise playing (AR, no menu).");
   } finally {
