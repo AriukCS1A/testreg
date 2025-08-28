@@ -23,6 +23,13 @@ window.addEventListener("unhandledrejection", (e) => {
   }
 });
 
+function planeUseLumaKey(tex, opts){
+  import("./ar.js").then(({ applyLumaKey }) => {
+    applyLumaKey(tex, opts);
+  });
+}
+
+
 // ======= Config =======
 const ALLOW_DUPLICATE_TO_ENTER = false;
 const DEFAULT_LOC_RADIUS_M = 200;
@@ -772,7 +779,8 @@ async function startExerciseDirect(){
     vEx.__threeVideoTex = texEx;
 
     if (exKind === "sbs" || isSbsVideo(exDoc, vEx)) { planeUseShader(texEx); }
-    else                                            { planeUseMap(texEx); }
+    else if (exKind === "alpha")               { planeUseMap(texEx); }
+    else {planeUseLumaKey?.(texEx, { cut:0.22, feather:0.12 }); }
 
     fitPlaneToVideo(vEx);
 

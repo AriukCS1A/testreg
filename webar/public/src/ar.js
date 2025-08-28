@@ -218,6 +218,51 @@ export function makeSbsAlphaMaterial(tex) {
   });
 }
 
+// makeSbsAlphaMaterial-ийн доор нэм
+export function makeLumaKeyMaterial(tex, { cut = 0.22, feather = 0.12 } = {}) {
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    uniforms: {
+      map:  { value: tex },
+      uCut: { value: cut },
+      uFea: { value: feather },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main(){
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+      }`,
+    fragmentShader: `
+      precision mediump float;
+      uniform sampler2D map;
+      uniform float uCut, uFea;
+      varying vec2 vUv;
+      void main(){
+        vec4 c = texture2D(map, vUv);
+        float luma = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+        float a = smoothstep(uCut, uCut + uFea, luma);
+        gl_FragColor = vec4(c.rgb, a);
+      }`,
+  });
+}
+
+export function applyLumaKey(tex, opts) {
+  plane.material?.dispose?.();
+  plane.material = makeLumaKeyMaterial(tex, opts);
+  plane.material.needsUpdate = true;
+  plane.material.transparent = true;
+  plane.material.depthWrite = false;
+}
+
+
 /* ===== Туслах ===== */
 export function worldToScreen(v) {
   if (!renderer || !camera) return { x: -9999, y: -9999 };
