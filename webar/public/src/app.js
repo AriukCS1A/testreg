@@ -29,7 +29,6 @@ function planeUseLumaKey(tex, opts){
   });
 }
 
-
 // ======= Config =======
 const ALLOW_DUPLICATE_TO_ENTER = false;
 const DEFAULT_LOC_RADIUS_M = 200;
@@ -134,10 +133,6 @@ function logVideoError(v, tag="video"){
     }).then(info=>dbg(`[${tag}] mediaCapabilities: ${JSON.stringify(info)}`)).catch(()=>{});
   } catch {}
 }
-// if (glCanvas) {
-//   glCanvas.addEventListener("webglcontextlost", ()=>dbg("[GL] webglcontextlost"), false);
-//   glCanvas.addEventListener("webglcontextrestored", ()=>dbg("[GL] webglcontextrestored"), false);
-// }
 
 /* ========= helpers ========= */
 async function safePlay(v){
@@ -165,6 +160,42 @@ async function ensureCameraOnce() {
   if (__camPromise) return __camPromise;
   __camPromise = ensureCamera().catch((e) => { __camPromise = null; throw e; });
   return __camPromise;
+}
+
+/* ----- Video alpha sniff helpers ----- */
+async function waitReady(v, minRS = 2) {
+  if (v.readyState >= minRS) return;
+  await new Promise((resolve) => {
+    const ok = () => { if (v.readyState >= minRS) { cleanup(); resolve(); } };
+    const to = setTimeout(() => { cleanup(); resolve(); }, 1500);
+    const cleanup = () => {
+      clearTimeout(to);
+      v.removeEventListener("loadeddata", ok);
+      v.removeEventListener("canplay", ok);
+      v.removeEventListener("canplaythrough", ok);
+    };
+    v.addEventListener("loadeddata", ok);
+    v.addEventListener("canplay", ok);
+    v.addEventListener("canplaythrough", ok);
+  });
+}
+
+async function videoLooksOpaque(v) {
+  try {
+    await waitReady(v, 2); // HAVE_CURRENT_DATA
+    const w = Math.max(2, Math.min(64, v.videoWidth || 0));
+    const h = Math.max(2, Math.min(64, v.videoHeight || 0));
+    const cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(v, 0, 0, w, h);
+    const a = ctx.getImageData(0, 0, w, h).data;
+    let minA = 255;
+    for (let i = 3; i < a.length; i += 4) if (a[i] < minA) minA = a[i];
+    return (minA > 250); // true => бүхэлдээ opaque (альфагүй)
+  } catch {
+    return true; // алдаа бол opaque гэж үзье
+  }
 }
 
 /* ========= Location match helpers ========= */
@@ -351,10 +382,8 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs){
 
       // kind-ийг найдвартай тодорхойлно
       const kind =
-        a.kind ||                      // 'alpha' | 'sbs' | 'flat' (pickBestForDevice-оос ирнэ)
-        (a.type === "video/webm"       // type байхгүй үед label-р унах
-          ? "alpha"
-          : (a.label.includes("sbs") ? "sbs" : "flat"));
+        a.kind ||
+        (a.type === "video/webm" ? "alpha" : (a.label.includes("sbs") ? "sbs" : "flat"));
 
       return kind;
     } catch (e) {
@@ -409,7 +438,6 @@ async function fetchLatestExerciseFor(locationId){
 }
 
 /* ========= Registration & scan helpers ========= */
-// uid-аар бүртгэл хайх
 async function getRegistrationByUid(uid){
   if (!uid) return null;
   const q = fsQuery(
@@ -486,7 +514,6 @@ function showPhoneGate(){
     const ref = doc(db, "phone_regs", phone);
     const snap = await getDoc(ref).catch(()=>null);
     if (snap && snap.exists()) {
-      // Жинхэнэ давхардал
       if (!ALLOW_DUPLICATE_TO_ENTER) {
         otpError.textContent = "Энэ дугаар аль хэдийн бүртгэлтэй байна.";
         setTimeout(()=>{ otpError.textContent=""; }, 2200);
@@ -505,7 +532,6 @@ function showPhoneGate(){
         });
         return;
       } else {
-        // Давхардлыг зөвшөөрвөл шууд нэвтрүүлнэ
         otpGate.hidden = true; otpPhoneEl.value = "";
         if (!window.__introStarted) { window.__introStarted = true; await startIntroFlow(true); }
         const chkOld = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
@@ -525,11 +551,11 @@ function showPhoneGate(){
       }
     }
 
-    // 3) ШИНЭ бүртгэл — setDoc (rules шинэ doc-д create зөвшөөрнө)
+    // 3) ШИНЭ бүртгэл — setDoc
     try {
       await setDoc(ref, {
         phone,
-        uid: auth.currentUser?.uid || null,  // ← rules-д зөвшөөрсөн
+        uid: auth.currentUser?.uid || null,
         source:"webar",
         createdAt: serverTimestamp(),
         ua: navigator.userAgent.slice(0,1000),
@@ -540,7 +566,6 @@ function showPhoneGate(){
       REG_INFO = { phone, docId: phone };
     } catch (e) {
       console.error("setDoc failed:", e);
-      // permission-denied = rules issue, давхардал биш (энд аль хэдийн exists=false)
       otpError.textContent = (e?.code === "permission-denied")
         ? "Бүртгэх эрх байхгүй байна (rules-аа шалгана уу)."
         : (e?.message || "Бүртгэл амжилтгүй");
@@ -580,7 +605,6 @@ function showPhoneGate(){
 
 /* ========= Init: gate эсвэл шууд оруулах ========= */
 async function initGateOrAutoEnter(){
-  // position (логдоо хэрэгтэй)
   let pos = null;
   try {
     pos = await getGeoOnce({ enableHighAccuracy:true, timeout:12000 });
@@ -594,7 +618,6 @@ async function initGateOrAutoEnter(){
     dbg("Boot within?", chk);
   }
 
-  // Энэ browser/device-ээр өмнө бүртгүүлсэн үү?
   const reg = await getRegistrationByUid(uid);
   if (reg) {
     REG_INFO = reg;
@@ -604,7 +627,6 @@ async function initGateOrAutoEnter(){
     showPhoneGate();
   }
 
-  // QR-оор орсон болгонд лог үлдээнэ
   await logScan({
     uid, phone: reg?.phone || null, loc: QR_LOC_ID, pos,
     ua: navigator.userAgent,
@@ -701,7 +723,6 @@ async function startIntroFlow(fromTap=false){
     const introKind = await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4, introSrc.mp4_sbs);
     if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, exSrc.mp4_sbs);
 
-    // metadata хүртэл
     if (vIntro.readyState < 1) {
       await new Promise(r => vIntro.addEventListener("loadedmetadata", r, { once:true }));
     }
@@ -709,9 +730,17 @@ async function startIntroFlow(fromTap=false){
     texIntro.needsUpdate = true;
     vIntro.__threeVideoTex = texIntro;
 
-    if (introKind === "sbs" || isSbsVideo(introDoc, vIntro)) { planeUseShader(texIntro); }
-    else if (introKind === "alpha")               { planeUseMap(texIntro); }
-    else {planeUseLumaKey?.(texIntro, { cut:0.22, feather:0.12 }); }
+    // ⬇️ Альфа-г бодитоор шалгаж шийднэ
+    let useIntroKind = introKind;
+    if (useIntroKind === "alpha" && await videoLooksOpaque(vIntro)) useIntroKind = "flat";
+
+    if (useIntroKind === "sbs" || isSbsVideo(introDoc, vIntro)) {
+      planeUseShader(texIntro);
+    } else if (useIntroKind === "alpha") {
+      planeUseMap(texIntro);
+    } else {
+      planeUseLumaKey(texIntro, { cut:0.22, feather:0.12 });
+    }
 
     fitPlaneToVideo(vIntro);
 
@@ -778,9 +807,17 @@ async function startExerciseDirect(){
     texEx.needsUpdate = true;
     vEx.__threeVideoTex = texEx;
 
-    if (exKind === "sbs" || isSbsVideo(exDoc, vEx)) { planeUseShader(texEx); }
-    else if (exKind === "alpha")               { planeUseMap(texEx); }
-    else {planeUseLumaKey?.(texEx, { cut:0.22, feather:0.12 }); }
+    // ⬇️ Альфа-г бодитоор шалгаж шийднэ
+    let useExKind = exKind;
+    if (useExKind === "alpha" && await videoLooksOpaque(vEx)) useExKind = "flat";
+
+    if (useExKind === "sbs" || isSbsVideo(exDoc, vEx)) {
+      planeUseShader(texEx);
+    } else if (useExKind === "alpha") {
+      planeUseMap(texEx);
+    } else {
+      planeUseLumaKey(texEx, { cut:0.22, feather:0.12 });
+    }
 
     fitPlaneToVideo(vEx);
 
