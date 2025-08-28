@@ -337,16 +337,26 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs){
       if (v.readyState >= 3) finishOk();
     });
   }
-
   let lastErr;
   for (const a of attempts){
-    try { await tryOnce(a); return (a.type==="video/webm" ? "alpha" : (a.label.includes("sbs") ? "sbs" : "flat")); }
-    catch(e){
+    try {
+      await tryOnce(a);
+
+      // kind-ийг найдвартай тодорхойлно
+      const kind =
+        a.kind ||                      // 'alpha' | 'sbs' | 'flat' (pickBestForDevice-оос ирнэ)
+        (a.type === "video/webm"       // type байхгүй үед label-р унах
+          ? "alpha"
+          : (a.label.includes("sbs") ? "sbs" : "flat"));
+
+      return kind;
+    } catch (e) {
       logVideoError(v, "candidate");
       lastErr = e;
     }
   }
   throw lastErr || new Error("video load failed");
+
 }
 
 // Debug events
@@ -693,7 +703,8 @@ async function startIntroFlow(fromTap=false){
     vIntro.__threeVideoTex = texIntro;
 
     if (introKind === "sbs" || isSbsVideo(introDoc, vIntro)) { planeUseShader(texIntro); }
-    else                                                      { planeUseMap(texIntro); }
+    else if (introKind === "alpha")               { planeUseMap(texIntro); }
+    else {planeUseLumaKey?.(texIntro, { cut:0.22, feather:0.12 }); }
 
     fitPlaneToVideo(vIntro);
 
@@ -784,6 +795,7 @@ function planeUseMap(tex){
     plane.material.map = tex;
     plane.material.transparent = true;
     plane.material.depthWrite = false;
+    plane.material.alphaTest = 0.01;
     plane.material.needsUpdate = true;
   });
 }

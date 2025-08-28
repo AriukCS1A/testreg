@@ -141,7 +141,7 @@ export function setSources(videoEl, webm = "", mp4 = "", forceMP4 = false) {
     videoEl.appendChild(s);
   } else if (webm) {
     const s = document.createElement("source");
-    s.src = webm; s.type = 'video/webm; codecs="vp9,opus"';
+    s.src = webm; s.type = 'video/webm; codecs="vp8,opus"';
     videoEl.appendChild(s);
   } else if (mp4) {
     const s = document.createElement("source");
@@ -155,9 +155,12 @@ export function setSources(videoEl, webm = "", mp4 = "", forceMP4 = false) {
 export function videoTexture(el) {
   const t = new THREE.VideoTexture(el);
   t.colorSpace = THREE.SRGBColorSpace;
+  t.format = THREE.RGBAFormat;
+  t.generateMipmaps = false;
   t.flipY = true;
   t.minFilter = THREE.LinearFilter;
   t.magFilter = THREE.LinearFilter;
+  t.needsUpdate = true;
   return t;
 }
 
