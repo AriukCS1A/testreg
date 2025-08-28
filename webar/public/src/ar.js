@@ -102,24 +102,19 @@ export async function ensureCamera() {
 
   dbg("asking camera permission…");
   try {
-    // 1) Аль хэдийн зөвшөөрөгдсөн эсэх
     let granted = await ZT.permissionGranted();
-    // 2) Хэрэв биш бол зөвшөөрөл хүснэ (UI-гүй хувилбар)
     if (!granted) {
       try { granted = await ZT.permissionRequest(); } catch { granted = false; }
     }
-    // 3) Татгалзсан бол алдаа + зааврын UI
     if (!granted) {
       await ZT.permissionDeniedUI();
       throw new Error("camera permission denied");
     }
 
-    // 4) Зөвшөөрсөн үед л камераа асаана
     await camera.start(); // rear camera
     scene.background = camera.backgroundTexture;
     cameraStarted = true;
 
-    // 1 frame хүлээгээд bg bind баталгаажуулна
     await new Promise(r => requestAnimationFrame(r));
     dbg("camera started (bg bound)");
   } catch (e) {
@@ -209,18 +204,16 @@ export function makeSbsAlphaMaterial(tex) {
       uniform sampler2D map;
       varying vec2 vUv;
       void main(){
-        // Зүүн талын хагас: RGB
         vec3 rgb = texture2D(map, vec2(vUv.x * 0.5, vUv.y)).rgb;
-        // Баруун талын хагас: Alpha (R суваг)
         float a  = texture2D(map, vec2(0.5 + vUv.x * 0.5, vUv.y)).r;
         gl_FragColor = vec4(rgb, a);
       }`,
   });
 }
 
-// makeSbsAlphaMaterial-ийн доор нэм
+// Luma-key fallback (альфа байхгүй MP4-д)
 export function makeLumaKeyMaterial(tex, { cut = 0.22, feather = 0.12 } = {}) {
-  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.colorSpace = THREE.SRGBColorSpace; // ✅ зөв constant
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.minFilter = THREE.LinearFilter;
   tex.magFilter = THREE.LinearFilter;
@@ -261,7 +254,6 @@ export function applyLumaKey(tex, opts) {
   plane.material.transparent = true;
   plane.material.depthWrite = false;
 }
-
 
 /* ===== Туслах ===== */
 export function worldToScreen(v) {

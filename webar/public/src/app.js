@@ -3,7 +3,6 @@ import { isIOS, dbg as _dbg } from "./utils.js";
 import {
   initAR, ensureCamera, onFrame,
   videoTexture, fitPlaneToVideo, applyScale,
-  // glCanvas
 } from "./ar.js";
 import {
   bindIntroButtons, updateIntroButtons,
@@ -24,9 +23,7 @@ window.addEventListener("unhandledrejection", (e) => {
 });
 
 function planeUseLumaKey(tex, opts){
-  import("./ar.js").then(({ applyLumaKey }) => {
-    applyLumaKey(tex, opts);
-  });
+  import("./ar.js").then(({ applyLumaKey }) => applyLumaKey(tex, opts));
 }
 
 // ======= Config =======
@@ -143,7 +140,6 @@ async function safePlay(v){
     else throw e;
   }
 }
-// Decode-friendly (offscreen)
 function makeVideoDecodeFriendly(v){
   try {
     v.removeAttribute("hidden");
@@ -182,7 +178,7 @@ async function waitReady(v, minRS = 2) {
 
 async function videoLooksOpaque(v) {
   try {
-    await waitReady(v, 2); // HAVE_CURRENT_DATA
+    await waitReady(v, 2);
     const w = Math.max(2, Math.min(64, v.videoWidth || 0));
     const h = Math.max(2, Math.min(64, v.videoHeight || 0));
     const cv = document.createElement("canvas");
@@ -192,9 +188,9 @@ async function videoLooksOpaque(v) {
     const a = ctx.getImageData(0, 0, w, h).data;
     let minA = 255;
     for (let i = 3; i < a.length; i += 4) if (a[i] < minA) minA = a[i];
-    return (minA > 250); // true => бүхэлдээ opaque (альфагүй)
+    return (minA > 250);
   } catch {
-    return true; // алдаа бол opaque гэж үзье
+    return true; // алдаа бол opaque гэж үзье (CORS таараагүй үед)
   }
 }
 
@@ -241,17 +237,26 @@ function extFromUrl(u=""){ try{ return (new URL(u).pathname.match(/\.([a-z0-9]+)
 function pickSourcesFromDoc(doc) {
   const out = { webm:null, mp4_sbs:null, mp4:null };
   const url = cleanUrl(doc?.url);
-  const fmt = normFormat(doc?.format || "") || normFormat(extFromUrl(url || ""));
-  if (url) {
-    if (fmt === "webm") out.webm = url;
-    else if (fmt === "mp4_sbs" || /_sbs\.(mp4|mov)$/i.test(url)) out.mp4_sbs = url;
-    else if (fmt === "mp4") out.mp4 = url;
-    else {
-      const ext = extFromUrl(url);
-      if (ext === "webm") out.webm = url;
-      else if (ext === "mp4") out.mp4 = url;
-    }
+  if (!url) return out;
+
+  // 1) URL өргөтгөлд илүү итгэнэ
+  const ext = extFromUrl(url);
+  const hasSbsTag = /(?:^|[_-])sbs(?:[_-]|\.|$)/i.test(url) || /_sbs\.(mp4|mov)$/i.test(url);
+
+  if (ext === "webm") {
+    out.webm = url;
+  } else if (ext === "mp4" || ext === "mov") {
+    if (hasSbsTag) out.mp4_sbs = url; else out.mp4 = url;
   }
+
+  // 2) Хэрэв дээр нь юу ч тогтоогдоогүй бол format талбар луу унагана
+  if (!out.webm && !out.mp4_sbs && !out.mp4) {
+    const fmt = normFormat(doc?.format || "");
+    if (fmt === "webm") out.webm = url;
+    else if (fmt === "mp4_sbs") out.mp4_sbs = url;
+    else if (fmt === "mp4") out.mp4 = url;
+  }
+
   dbg("pickSources:", out);
   return out;
 }
@@ -262,7 +267,7 @@ function isSbsVideo(doc, vEl) {
   if (hint.includes("sbs")) return true;
   if (hint.includes("vp8")) return false;
   const tagStr = (doc?.name || "") + " " + (doc?.url || "");
-  if (/_sbs\b/i.test(tagStr)) return true;
+  if (/(?:^|[_-])sbs(?:[_-]|\.|$)/i.test(tagStr)) return true;
   const w = vEl?.videoWidth || 0, h = vEl?.videoHeight || 0;
   if (w && h) {
     const r = w/h;
@@ -315,7 +320,6 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs){
   const base = pickBestForDevice({ webm, mp4_sbs, mp4 });
   if (!base.length) throw new Error("No playable sources for this device");
 
-  // Build attempts: no-seek / seek × type sniff / typed
   const attempts = [];
   for (const c of base) {
     const plain = { ...c, label: c.kind+"|no-seek|sniff", url: c.url, type:null };
@@ -343,7 +347,7 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs){
 
       const to = setTimeout(()=>finishErr("timeout"), TIMEOUT_MS);
 
-      const onAbort = () => { dbg("VIDEO abort (ignore, keep waiting)"); /* ignore */ };
+      const onAbort = () => { dbg("VIDEO abort (ignore, keep waiting)"); };
       const onError = () => {
         if (v.networkState === 3 && v.readyState === 0) finishErr("NETWORK_NO_SOURCE");
         else finishErr("error");
@@ -379,12 +383,7 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs){
   for (const a of attempts){
     try {
       await tryOnce(a);
-
-      // kind-ийг найдвартай тодорхойлно
-      const kind =
-        a.kind ||
-        (a.type === "video/webm" ? "alpha" : (a.label.includes("sbs") ? "sbs" : "flat"));
-
+      const kind = a.kind || (a.type === "video/webm" ? "alpha" : (a.label.includes("sbs") ? "sbs" : "flat"));
       return kind;
     } catch (e) {
       logVideoError(v, "candidate");
@@ -392,7 +391,6 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs){
     }
   }
   throw lastErr || new Error("video load failed");
-
 }
 
 // Debug events
@@ -807,7 +805,6 @@ async function startExerciseDirect(){
     texEx.needsUpdate = true;
     vEx.__threeVideoTex = texEx;
 
-    // ⬇️ Альфа-г бодитоор шалгаж шийднэ
     let useExKind = exKind;
     if (useExKind === "alpha" && await videoLooksOpaque(vEx)) useExKind = "flat";
 
