@@ -9,7 +9,6 @@ import {
   showMenuOverlay, closeMenu, stopIntroButtons,
 } from "./ui.js";
 
-// ------- dbg wrapper -------
 const dbg = (...a) => _dbg ? _dbg("[AR]", ...a) : console.log("[AR]", ...a);
 
 // ==== Swallow "play() was interrupted..." ====
@@ -23,7 +22,9 @@ window.addEventListener("unhandledrejection", (e) => {
 });
 
 function planeUseLumaKey(tex, opts){
-  import("./ar.js").then(({ applyLumaKey }) => applyLumaKey(tex, opts));
+  import("./ar.js").then(({ applyLumaKey }) => {
+    applyLumaKey(tex, opts);
+  });
 }
 
 // ======= Config =======
@@ -190,7 +191,9 @@ async function videoLooksOpaque(v) {
     for (let i = 3; i < a.length; i += 4) if (a[i] < minA) minA = a[i];
     return (minA > 250);
   } catch {
-    return true; // алдаа бол opaque гэж үзье (CORS таараагүй үед)
+    // Canvas CORS / decode алдаа → урьд нь true буцааж flat руу унагаж байсан.
+    // WEBM-alpha дээр буруу уналт хийдэг тул эндээс false буцаая.
+    return false;
   }
 }
 
@@ -239,7 +242,7 @@ function pickSourcesFromDoc(doc) {
   const url = cleanUrl(doc?.url);
   if (!url) return out;
 
-  // 1) URL өргөтгөлд илүү итгэнэ
+  // URL өргөтгөлд итгэнэ
   const ext = extFromUrl(url);
   const hasSbsTag = /(?:^|[_-])sbs(?:[_-]|\.|$)/i.test(url) || /_sbs\.(mp4|mov)$/i.test(url);
 
@@ -249,7 +252,7 @@ function pickSourcesFromDoc(doc) {
     if (hasSbsTag) out.mp4_sbs = url; else out.mp4 = url;
   }
 
-  // 2) Хэрэв дээр нь юу ч тогтоогдоогүй бол format талбар луу унагана
+  // fallback: format талбар
   if (!out.webm && !out.mp4_sbs && !out.mp4) {
     const fmt = normFormat(doc?.format || "");
     if (fmt === "webm") out.webm = url;
@@ -728,15 +731,20 @@ async function startIntroFlow(fromTap=false){
     texIntro.needsUpdate = true;
     vIntro.__threeVideoTex = texIntro;
 
-    // ⬇️ Альфа-г бодитоор шалгаж шийднэ
+    // ✅ WEBM-alpha бол шууд итгэнэ, MP4-alpha үед л opaque эсэхийг шалгана
     let useIntroKind = introKind;
-    if (useIntroKind === "alpha" && await videoLooksOpaque(vIntro)) useIntroKind = "flat";
+    const introExt = (vIntro.currentSrc && vIntro.currentSrc.split(".").pop()?.toLowerCase()) || "";
+    if (useIntroKind === "alpha" && introExt !== "webm") {
+      if (await videoLooksOpaque(vIntro)) useIntroKind = "flat";
+    }
 
     if (useIntroKind === "sbs" || isSbsVideo(introDoc, vIntro)) {
       planeUseShader(texIntro);
     } else if (useIntroKind === "alpha") {
+      // RGBA (VP8/VP9 alpha) → шууд map
       planeUseMap(texIntro);
     } else {
+      // Альфа байхгүй → лума кей
       planeUseLumaKey(texIntro, { cut:0.22, feather:0.12 });
     }
 
@@ -806,7 +814,10 @@ async function startExerciseDirect(){
     vEx.__threeVideoTex = texEx;
 
     let useExKind = exKind;
-    if (useExKind === "alpha" && await videoLooksOpaque(vEx)) useExKind = "flat";
+    const exExt = (vEx.currentSrc && vEx.currentSrc.split(".").pop()?.toLowerCase()) || "";
+    if (useExKind === "alpha" && exExt !== "webm") {
+      if (await videoLooksOpaque(vEx)) useExKind = "flat";
+    }
 
     if (useExKind === "sbs" || isSbsVideo(exDoc, vEx)) {
       planeUseShader(texEx);

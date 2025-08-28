@@ -98,7 +98,7 @@ export function onFrame(cb) { onFrameCb = cb; }
 
 /* ===== Камер зөв асаалт ===== */
 export async function ensureCamera() {
-  if (cameraStarted) return; // аль хэдийн ассан
+  if (cameraStarted) return;
 
   dbg("asking camera permission…");
   try {
@@ -204,7 +204,9 @@ export function makeSbsAlphaMaterial(tex) {
       uniform sampler2D map;
       varying vec2 vUv;
       void main(){
+        // Зүүн талын хагас: RGB
         vec3 rgb = texture2D(map, vec2(vUv.x * 0.5, vUv.y)).rgb;
+        // Баруун талын хагас: Alpha (R суваг)
         float a  = texture2D(map, vec2(0.5 + vUv.x * 0.5, vUv.y)).r;
         gl_FragColor = vec4(rgb, a);
       }`,
@@ -213,7 +215,7 @@ export function makeSbsAlphaMaterial(tex) {
 
 // Luma-key fallback (альфа байхгүй MP4-д)
 export function makeLumaKeyMaterial(tex, { cut = 0.22, feather = 0.12 } = {}) {
-  tex.colorSpace = THREE.SRGBColorSpace; // ✅ зөв constant
+  tex.colorSpace = THREE.SRGBColorSpace; // ✅ зөв
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.minFilter = THREE.LinearFilter;
   tex.magFilter = THREE.LinearFilter;
