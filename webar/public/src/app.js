@@ -444,75 +444,121 @@ function showPhoneGate(){
   gateWired = true;
 
   btnSendCode?.addEventListener("click", async () => {
-    let busy = false;
-    if (busy) return;
-    try {
-      busy = true; btnSendCode.disabled = true;
-      otpError.textContent = "";
-      const phone = normalizeMnPhone(otpPhoneEl.value.trim());
-      if (!auth.currentUser) await signInAnonymously(auth).catch(()=>{});
+  let busy = false;
+  if (busy) return;
+  try {
+    busy = true; btnSendCode.disabled = true;
+    otpError.textContent = "";
+    const phone = normalizeMnPhone(otpPhoneEl.value.trim());
+    if (!auth.currentUser) await signInAnonymously(auth).catch(()=>{});
 
-      let pos;
-      try {
-        pos = await getGeoOnce({ enableHighAccuracy:true, timeout:12000 });
-        dbg("Gate position:", fmtLoc(pos));
-      } catch (e) {
-        otpError.textContent = e?.code===1
-          ? "Байршлын зөвшөөрөл хэрэгтэй байна."
-          : "Байршил олдсонгүй.";
-        setTimeout(()=>{ otpError.textContent=""; }, 3500);
+    // 1) GPS
+    let pos;
+    try {
+      pos = await getGeoOnce({ enableHighAccuracy:true, timeout:12000 });
+      dbg("Gate position:", fmtLoc(pos));
+    } catch (e) {
+      otpError.textContent = e?.code===1
+        ? "Байршлын зөвшөөрөл хэрэгтэй байна."
+        : "Байршил олдсонгүй.";
+      setTimeout(()=>{ otpError.textContent=""; }, 3500);
+      return;
+    }
+
+    // 2) Урьдчилан шалгах: давхардсан эсэх
+    const ref = doc(db, "phone_regs", phone);
+    const snap = await getDoc(ref).catch(()=>null);
+    if (snap && snap.exists()) {
+      // Жинхэнэ давхардал
+      if (!ALLOW_DUPLICATE_TO_ENTER) {
+        otpError.textContent = "Энэ дугаар аль хэдийн бүртгэлтэй байна.";
+        setTimeout(()=>{ otpError.textContent=""; }, 2200);
+        const chkOld = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
+        await logScan({
+          uid: auth.currentUser?.uid || null,
+          phone,
+          loc: QR_LOC_ID,
+          pos,
+          ua: navigator.userAgent,
+          decision: {
+            ok: chkOld.ok, dist: Math.round(chkOld.dist||0),
+            radius: chkOld.radius, buffer: Math.round(chkOld.buffer||0),
+            reason: chkOld.reason
+          }
+        });
+        return;
+      } else {
+        // Давхардлыг зөвшөөрвөл шууд нэвтрүүлнэ
+        otpGate.hidden = true; otpPhoneEl.value = "";
+        if (!window.__introStarted) { window.__introStarted = true; await startIntroFlow(true); }
+        const chkOld = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
+        await logScan({
+          uid: auth.currentUser?.uid || null,
+          phone,
+          loc: QR_LOC_ID,
+          pos,
+          ua: navigator.userAgent,
+          decision: {
+            ok: chkOld.ok, dist: Math.round(chkOld.dist||0),
+            radius: chkOld.radius, buffer: Math.round(chkOld.buffer||0),
+            reason: chkOld.reason
+          }
+        });
         return;
       }
-
-      try {
-        await setDoc(doc(db,"phone_regs",phone), {
-          phone,
-          uid: auth.currentUser?.uid || null,  // ← uid хадгална
-          source:"webar",
-          createdAt: serverTimestamp(),
-          ua: navigator.userAgent.slice(0,1000),
-          lat:Number(pos.coords.latitude), lng:Number(pos.coords.longitude),
-          accuracy:Number(pos.coords.accuracy ?? 0), qrId: QR_LOC_ID || null,
-        }, { merge:false });
-
-        // амжилттай бол локал төлөвт
-        REG_INFO = { phone, docId: phone };
-
-      } catch (e) {
-        if (e?.code === "permission-denied") {
-          otpError.textContent = "Энэ дугаар аль хэдийн бүртгэлтэй байна.";
-          setTimeout(()=>{ otpError.textContent=""; }, 2200);
-          if (ALLOW_DUPLICATE_TO_ENTER) {
-            otpGate.hidden = true; otpPhoneEl.value = "";
-            if (!window.__introStarted) { window.__introStarted = true; await startIntroFlow(true); }
-          }
-          const chkOld = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
-          await logScan({ uid: auth.currentUser?.uid || null, phone, loc:QR_LOC_ID, pos, ua:navigator.userAgent, decision:{
-            ok:chkOld.ok, dist:Math.round(chkOld.dist||0), radius:chkOld.radius,
-            buffer:Math.round(chkOld.buffer||0), reason:chkOld.reason
-          }});
-          return;
-        }
-        throw e;
-      }
-
-      const chk = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
-      dbg("Gate decision:", chk);
-      await logScan({ uid: auth.currentUser?.uid || null, phone, loc:QR_LOC_ID, pos, ua:navigator.userAgent, decision:{
-        ok:chk.ok, dist:Math.round(chk.dist||0), radius:chk.radius,
-        buffer:Math.round(chk.buffer||0), reason:chk.reason
-      }});
-
-      otpGate.hidden = true; otpPhoneEl.value = "";
-      if (!window.__introStarted) { window.__introStarted = true; await startIntroFlow(true); }
-    } catch (e) {
-      console.error(e);
-      otpError.textContent = e?.message || "Бүртгэл амжилтгүй";
-      setTimeout(()=>{ otpError.textContent=""; }, 3500);
-    } finally {
-      busy = false; btnSendCode.disabled = false;
     }
-  }, { passive:true });
+
+    // 3) ШИНЭ бүртгэл — setDoc (rules шинэ doc-д create зөвшөөрнө)
+    try {
+      await setDoc(ref, {
+        phone,
+        uid: auth.currentUser?.uid || null,  // ← rules-д зөвшөөрсөн
+        source:"webar",
+        createdAt: serverTimestamp(),
+        ua: navigator.userAgent.slice(0,1000),
+        lat:Number(pos.coords.latitude), lng:Number(pos.coords.longitude),
+        accuracy:Number(pos.coords.accuracy ?? 0), qrId: QR_LOC_ID || null,
+      }, { merge:false });
+
+      REG_INFO = { phone, docId: phone };
+    } catch (e) {
+      console.error("setDoc failed:", e);
+      // permission-denied = rules issue, давхардал биш (энд аль хэдийн exists=false)
+      otpError.textContent = (e?.code === "permission-denied")
+        ? "Бүртгэх эрх байхгүй байна (rules-аа шалгана уу)."
+        : (e?.message || "Бүртгэл амжилтгүй");
+      setTimeout(()=>{ otpError.textContent=""; }, 3500);
+      return;
+    }
+
+    // 4) Лог + нэвтрүүлэх
+    const chk = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
+    dbg("Gate decision:", chk);
+    await logScan({
+      uid: auth.currentUser?.uid || null,
+      phone,
+      loc: QR_LOC_ID,
+      pos,
+      ua: navigator.userAgent,
+      decision: {
+        ok: chk.ok, dist: Math.round(chk.dist||0),
+        radius: chk.radius, buffer: Math.round(chk.buffer||0),
+        reason: chk.reason
+      }
+    });
+
+    otpGate.hidden = true; otpPhoneEl.value = "";
+    if (!window.__introStarted) { window.__introStarted = true; await startIntroFlow(true); }
+
+  } catch (e) {
+    console.error(e);
+    otpError.textContent = e?.message || "Бүртгэл амжилтгүй";
+    setTimeout(()=>{ otpError.textContent=""; }, 3500);
+  } finally {
+    busy = false; btnSendCode.disabled = false;
+  }
+}, { passive:true });
+
 }
 
 /* ========= Init: gate эсвэл шууд оруулах ========= */
