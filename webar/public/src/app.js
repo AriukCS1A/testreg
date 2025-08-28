@@ -742,7 +742,7 @@ async function startIntroFlow(fromTap=false){
       planeUseMap(texIntro);
     } else {
       // Альфа байхгүй → лума кей
-      planeUseLumaKey(texIntro, { cut: 0.12, feather: 0.10 });
+      planeUseLumaKey(texIntro, { cut: 0.08, feather: 0.20, gamma: 0.85 });
     }
 
     fitPlaneToVideo(vIntro);
@@ -820,7 +820,7 @@ async function startExerciseDirect(){
     } else if (useExKind === "alpha") {
       planeUseMap(texEx);
     } else {
-      planeUseLumaKey(texEx, { cut: 0.12, feather: 0.10 });
+      planeUseLumaKey(texEx, { cut: 0.08, feather: 0.20, gamma: 0.85 });
     }
 
     fitPlaneToVideo(vEx);

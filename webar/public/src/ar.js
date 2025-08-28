@@ -220,7 +220,11 @@ export function makeSbsAlphaMaterial(tex) {
 }
 
 // Luma-key fallback (альфа байхгүй MP4-д)
-export function makeLumaKeyMaterial(tex, { cut = 0.22, feather = 0.12 } = {}) {
+// --- REPLACE makeLumaKeyMaterial WITH THIS ---
+export function makeLumaKeyMaterial(
+  tex,
+  { cut = 0.08, feather = 0.20, gamma = 0.85 } = {}
+) {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.minFilter = THREE.LinearFilter;
@@ -231,26 +235,37 @@ export function makeLumaKeyMaterial(tex, { cut = 0.22, feather = 0.12 } = {}) {
     depthWrite: false,
     side: THREE.DoubleSide,
     uniforms: {
-      map:  { value: tex },
-      uCut: { value: cut },
-      uFea: { value: feather },
+      map:   { value: tex },
+      uCut:  { value: cut },
+      uFea:  { value: feather },
+      uGam:  { value: gamma },
     },
     vertexShader: `
       varying vec2 vUv;
-      void main(){
+      void main() {
         vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }`,
     fragmentShader: `
       precision mediump float;
       uniform sampler2D map;
-      uniform float uCut, uFea;
+      uniform float uCut, uFea, uGam;
       varying vec2 vUv;
-      void main(){
+
+      void main() {
         vec4 c = texture2D(map, vUv);
-        float luma = dot(c.rgb, vec3(0.299, 0.587, 0.114));
-        float a = smoothstep(uCut, uCut + uFea, luma);
-        gl_FragColor = vec4(c.rgb, a);
+
+        // 1) Near-black key: value = max(R,G,B)  → улаан давамгай хэсгийг хамгаална
+        float value = max(max(c.r, c.g), c.b);
+
+        // 2) Soft threshold + gamma boost
+        float a = smoothstep(uCut, uCut + uFea, value);
+        a = pow(a, uGam);
+
+        // 3) Un-premultiply to remove dark/halo edges
+        vec3 rgb = c.rgb / max(a, 1e-3);
+
+        gl_FragColor = vec4(rgb, a);
       }`,
   });
 }
@@ -258,10 +273,11 @@ export function makeLumaKeyMaterial(tex, { cut = 0.22, feather = 0.12 } = {}) {
 export function applyLumaKey(tex, opts) {
   plane.material?.dispose?.();
   plane.material = makeLumaKeyMaterial(tex, opts);
-  plane.material.needsUpdate = true;
   plane.material.transparent = true;
   plane.material.depthWrite = false;
+  plane.material.needsUpdate = true;
 }
+
 
 /* ===== Туслах ===== */
 export function worldToScreen(v) {
