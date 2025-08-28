@@ -172,7 +172,7 @@ function distanceMeters(a,b){
   const R=6371000, toRad=(x)=>x*Math.PI/180;
   const dLat=toRad(b.lat-a.lat), dLng=toRad(b.lng-a.lng);
   const la1=toRad(a.lat), la2=toRad(b.lat);
-  const h=Math.sin(dLat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
+  const h=Math.sin(dLat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(Math.abs(dLng)/2)**2;
   return 2*R*Math.asin(Math.sqrt(h));
 }
 async function isWithinQrLocation(pos, qrLocId, fallbackRadius=DEFAULT_LOC_RADIUS_M){
@@ -391,8 +391,24 @@ async function fetchLatestExerciseFor(locationId){
   return d;
 }
 
-/* ========= Scan LOG ========= */
-async function logScan({ phone, loc, pos, ua, decision }){
+/* ========= Registration & scan helpers ========= */
+// uid-аар бүртгэл хайх
+async function getRegistrationByUid(uid){
+  if (!uid) return null;
+  const q = fsQuery(
+    collection(db, "phone_regs"),
+    where("uid","==", uid),
+    limit(1)
+  );
+  const snap = await getDocs(q).catch(()=>null);
+  if (!snap || snap.empty) return null;
+  const doc0 = snap.docs[0];
+  const d = doc0.data() || {};
+  return { docId: doc0.id, phone: d.phone || null };
+}
+
+// Scan LOG (uid-тай)
+async function logScan({ uid, phone, loc, pos, ua, decision }){
   try {
     let locationName = null;
     if (loc) {
@@ -400,10 +416,13 @@ async function logScan({ phone, loc, pos, ua, decision }){
       if (d?.exists()) locationName = d.data()?.name || null;
     }
     await addDoc(collection(db,"scans"), {
-      phone, locId:loc||null, locationName:locationName||null,
-      lat:Number(pos?.coords?.latitude ?? null),
-      lng:Number(pos?.coords?.longitude ?? null),
-      accuracy:Number(pos?.coords?.accuracy ?? null),
+      uid: uid || null,
+      phone: phone || null,
+      locId: loc || null,
+      locationName: locationName || null,
+      lat: Number(pos?.coords?.latitude ?? null),
+      lng: Number(pos?.coords?.longitude ?? null),
+      accuracy: Number(pos?.coords?.accuracy ?? 0),
       decision: decision || null,
       ua: String(ua||"").slice(0,1000),
       source:"webar",
@@ -411,6 +430,9 @@ async function logScan({ phone, loc, pos, ua, decision }){
     });
   } catch (e) { console.warn("scan log failed:", e?.message||e); }
 }
+
+// Локал төлөв
+let REG_INFO = null;
 
 /* ========= Phone gate ========= */
 let gateWired = false;
@@ -444,11 +466,18 @@ function showPhoneGate(){
 
       try {
         await setDoc(doc(db,"phone_regs",phone), {
-          phone, source:"webar", createdAt: serverTimestamp(),
+          phone,
+          uid: auth.currentUser?.uid || null,  // ← uid хадгална
+          source:"webar",
+          createdAt: serverTimestamp(),
           ua: navigator.userAgent.slice(0,1000),
           lat:Number(pos.coords.latitude), lng:Number(pos.coords.longitude),
           accuracy:Number(pos.coords.accuracy ?? 0), qrId: QR_LOC_ID || null,
         }, { merge:false });
+
+        // амжилттай бол локал төлөвт
+        REG_INFO = { phone, docId: phone };
+
       } catch (e) {
         if (e?.code === "permission-denied") {
           otpError.textContent = "Энэ дугаар аль хэдийн бүртгэлтэй байна.";
@@ -458,7 +487,7 @@ function showPhoneGate(){
             if (!window.__introStarted) { window.__introStarted = true; await startIntroFlow(true); }
           }
           const chkOld = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
-          await logScan({ phone, loc:QR_LOC_ID, pos, ua:navigator.userAgent, decision:{
+          await logScan({ uid: auth.currentUser?.uid || null, phone, loc:QR_LOC_ID, pos, ua:navigator.userAgent, decision:{
             ok:chkOld.ok, dist:Math.round(chkOld.dist||0), radius:chkOld.radius,
             buffer:Math.round(chkOld.buffer||0), reason:chkOld.reason
           }});
@@ -469,7 +498,7 @@ function showPhoneGate(){
 
       const chk = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
       dbg("Gate decision:", chk);
-      await logScan({ phone, loc:QR_LOC_ID, pos, ua:navigator.userAgent, decision:{
+      await logScan({ uid: auth.currentUser?.uid || null, phone, loc:QR_LOC_ID, pos, ua:navigator.userAgent, decision:{
         ok:chk.ok, dist:Math.round(chk.dist||0), radius:chk.radius,
         buffer:Math.round(chk.buffer||0), reason:chk.reason
       }});
@@ -486,20 +515,56 @@ function showPhoneGate(){
   }, { passive:true });
 }
 
+/* ========= Init: gate эсвэл шууд оруулах ========= */
+async function initGateOrAutoEnter(){
+  // position (логдоо хэрэгтэй)
+  let pos = null;
+  try {
+    pos = await getGeoOnce({ enableHighAccuracy:true, timeout:12000 });
+    dbg("Boot pos:", fmtLoc(pos));
+  } catch {}
+
+  const uid = auth.currentUser?.uid || null;
+  let chk = null;
+  if (QR_LOC_ID && pos) {
+    chk = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
+    dbg("Boot within?", chk);
+  }
+
+  // Энэ browser/device-ээр өмнө бүртгүүлсэн үү?
+  const reg = await getRegistrationByUid(uid);
+  if (reg) {
+    REG_INFO = reg;
+    otpGate.hidden = true;
+    if (!window.__introStarted) { window.__introStarted = true; await startIntroFlow(true); }
+  } else {
+    showPhoneGate();
+  }
+
+  // QR-оор орсон болгонд лог үлдээнэ
+  await logScan({
+    uid, phone: reg?.phone || null, loc: QR_LOC_ID, pos,
+    ua: navigator.userAgent,
+    decision: chk ? {
+      ok: chk.ok,
+      dist: Math.round(chk.dist||0),
+      radius: chk.radius,
+      buffer: Math.round(chk.buffer||0),
+      reason: chk.reason
+    } : null
+  });
+}
+
 /* ========= main ========= */
 await initAR();
-signInAnonymously(auth).catch(()=>{});
+await signInAnonymously(auth).catch(()=>{});
 
 // Видео элементүүдийг decoding-д бэлэн болгоно
 makeVideoDecodeFriendly(vIntro);
 makeVideoDecodeFriendly(vEx);
 
-try {
-  const pos = await getGeoOnce().catch(()=>null);
-  if (pos) dbg("Boot pos:", fmtLoc(pos));
-} catch {}
-
-showPhoneGate();
+// Нэвтрэх эсэхийг uid-ээр шалгаад, лог хийнэ
+await initGateOrAutoEnter();
 
 tapLay.addEventListener("pointerdown", async ()=>{
   tapLay.style.display = "none";
