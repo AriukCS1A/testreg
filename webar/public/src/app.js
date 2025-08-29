@@ -867,7 +867,12 @@ function hidePlane() {
   import("./ar.js").then(({ plane }) => {
     if (!plane) return;
     plane.visible = false;
-    if (plane.material) plane.material.colorWrite = false;
+    if (plane.material) 
+      {
+        plane.material.colorWrite = false;
+        plane.material.opacity = 0;
+        plane.material.needsUpdate = true;
+      }
   });
 }
 async function revealPlaneWhenReady(v) {
@@ -877,7 +882,11 @@ async function revealPlaneWhenReady(v) {
   } catch {}
   import("./ar.js").then(({ plane }) => {
     if (!plane) return;
-    if (plane.material) plane.material.colorWrite = true;
+    if (plane.material) {
+      plane.material.colorWrite = true;
+      plane.material.opacity = 1;
+      plane.material.needsUpdate = true;
+    }
     plane.visible = true;
   });
 }
@@ -1087,6 +1096,7 @@ function planeUseMap(tex) {
     plane.material.transparent = true;
     plane.material.depthWrite = false;
     plane.material.alphaTest = 0.01;
+    plane.material.opacity = 1;
     plane.material.needsUpdate = true;
   });
 }
