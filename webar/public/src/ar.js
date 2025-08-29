@@ -56,8 +56,10 @@ export async function initAR() {
   // Video plane
   plane = new THREE.Mesh(
     new THREE.PlaneGeometry(1, 1),
-    new THREE.MeshBasicMaterial({ transparent: true, side: THREE.DoubleSide })
+    new THREE.MeshBasicMaterial({ transparent: true, side: THREE.DoubleSide, opacity: 0 }) // эхлээд ил тод
   );
+  plane.visibe = false;
+  plane.material.colorWrite = false; 
   anchor.add(plane);
 
   // Render loop
@@ -90,6 +92,13 @@ export async function initAR() {
     ZT.glContextSet(renderer.getContext());
     scene.background = camera.backgroundTexture;
     renderer.setClearColor(0x000000, 0); // 🔸 restore үед ч мөн
+    if(plane) {
+      plane.visibe = false;
+      if(plane.material) {
+        plane.material.colorWrite = false;
+        plane.material.opacity = 0;
+      }
+    }
     if (cameraStarted) { try { camera.start(); } catch {} }
     dbg("webgl context RESTORED + camera restarted");
   });
