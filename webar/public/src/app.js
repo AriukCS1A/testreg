@@ -28,14 +28,8 @@ window.addEventListener("unhandledrejection", (e) => {
   }
 });
 
-function planeUseLumaKey(tex, opts) {
-  import("./ar.js").then(({ applyLumaKey }) => {
-    applyLumaKey(tex, opts);
-  });
-}
-
 // ======= Config =======
-const ALLOW_DUPLICATE_TO_ENTER = false; // (одоо давхардсан үед ч оруулна)
+const ALLOW_DUPLICATE_TO_ENTER = false;
 const DEFAULT_LOC_RADIUS_M = 200;
 const ACCURACY_BUFFER_MAX = 75;
 
@@ -60,9 +54,7 @@ import {
 
 /* ========= Geolocation helpers ========= */
 let geoWatchId = null;
-function canGeolocate() {
-  return "geolocation" in navigator;
-}
+function canGeolocate() { return "geolocation" in navigator; }
 function getGeoOnce(options = {}) {
   if (!canGeolocate()) return Promise.reject(new Error("Geolocation not supported"));
   const opts = { enableHighAccuracy: true, timeout: 10000, maximumAge: 0, ...options };
@@ -121,7 +113,6 @@ const otpCodeWrap = document.getElementById("otpCodeWrap");
 const otpError = document.getElementById("otpError");
 
 let currentVideo = null;
-// ⚠️ Loading flags — declare early (avoid TDZ when used above later)
 let introLoading = false;
 let exLoading = false;
 
@@ -155,40 +146,58 @@ function logVideoError(v, tag = "video") {
     navigator.mediaCapabilities
       ?.decodingInfo?.({
         type: "file",
-        video: {
-          contentType: ct,
-          width: v.videoWidth || 640,
-          height: v.videoHeight || 360,
-          bitrate: 1_000_000,
-          framerate: 30,
-        },
+        video: { contentType: ct, width: v.videoWidth || 640, height: v.videoHeight || 360, bitrate: 1_000_000, framerate: 30 },
       })
       .then((info) => dbg(`[${tag}] mediaCapabilities: ${JSON.stringify(info)}`))
       .catch(() => {});
   } catch {}
 }
 
+/* ========= iOS permission gate (NEW) ========= */
+function isiOSUA(){ return /iPad|iPhone|iPod/.test(navigator.userAgent); }
+function explainIOSSettings(kind="camera"){
+  const app = "Safari";
+  const path = kind==="location" ? `${app} > Location > While Using the App` : `${app} > Camera > Allow`;
+  return isiOSUA() ? `iOS дээр ${path} тохиргоог зөвшөөрөөрэй.` : `Тохиргоон дотроос ${kind} зөвшөөрлөө идэвхжүүлнэ үү.`;
+}
+async function requestCameraOnce(){
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error("Камер ашиглах боломжгүй төхөөрөмж.");
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
+    s.getTracks().forEach(t=>t.stop());
+    return true;
+  } catch(e){
+    if (e?.name==="NotAllowedError") throw new Error("Камерын зөвшөөрөл хориглогдсон. " + explainIOSSettings("camera"));
+    if (e?.name==="NotFoundError") throw new Error("Камер олдсонгүй.");
+    throw new Error("Камер асаалт амжилтгүй: " + (e?.message||e));
+  }
+}
+async function requestGeoOnceUI(){
+  try { return await getGeoOnce({ enableHighAccuracy:true, timeout:15000 }); }
+  catch(e){
+    if (e?.code===1) throw new Error("Байршлын зөвшөөрөл хэрэгтэй. " + explainIOSSettings("location"));
+    if (e?.code===2) throw new Error("GPS дохио сул байна. Илүү нээлттэй газар дахин оролдоно уу.");
+    throw new Error("Байршил олдсонгүй. Сүлжээ/GPS-ээ шалгана уу.");
+  }
+}
+async function ensurePermissionsGate(){
+  await requestCameraOnce();
+  const pos = await requestGeoOnceUI();
+  return pos;
+}
+
 /* ========= helpers ========= */
 async function safePlay(v) {
   if (!v) return;
-  try {
-    await v.play();
-  } catch (e) {
-    if (e?.name === "AbortError") dbg("play() aborted (new load?)");
-    else throw e;
-  }
+  try { await v.play(); }
+  catch (e) { if (e?.name === "AbortError") dbg("play() aborted (new load?)"); else throw e; }
 }
 function makeVideoDecodeFriendly(v) {
   try {
     v.removeAttribute("hidden");
     Object.assign(v.style, {
-      position: "fixed",
-      left: "-9999px",
-      top: "-9999px",
-      width: "1px",
-      height: "1px",
-      opacity: "0",
-      pointerEvents: "none",
+      position: "fixed", left: "-9999px", top: "-9999px",
+      width: "1px", height: "1px", opacity: "0", pointerEvents: "none",
     });
   } catch {}
 }
@@ -197,10 +206,7 @@ function makeVideoDecodeFriendly(v) {
 let __camPromise = null;
 async function ensureCameraOnce() {
   if (__camPromise) return __camPromise;
-  __camPromise = ensureCamera().catch((e) => {
-    __camPromise = null;
-    throw e;
-  });
+  __camPromise = ensureCamera().catch((e) => { __camPromise = null; throw e; });
   return __camPromise;
 }
 
@@ -208,16 +214,8 @@ async function ensureCameraOnce() {
 async function waitReady(v, minRS = 2) {
   if (v.readyState >= minRS) return;
   await new Promise((resolve) => {
-    const ok = () => {
-      if (v.readyState >= minRS) {
-        cleanup();
-        resolve();
-      }
-    };
-    const to = setTimeout(() => {
-      cleanup();
-      resolve();
-    }, 1500);
+    const ok = () => { if (v.readyState >= minRS) { cleanup(); resolve(); } };
+    const to = setTimeout(() => { cleanup(); resolve(); }, 1500);
     const cleanup = () => {
       clearTimeout(to);
       v.removeEventListener("loadeddata", ok);
@@ -236,18 +234,14 @@ async function videoLooksOpaque(v) {
     const w = Math.max(2, Math.min(64, v.videoWidth || 0));
     const h = Math.max(2, Math.min(64, v.videoHeight || 0));
     const cv = document.createElement("canvas");
-    cv.width = w;
-    cv.height = h;
+    cv.width = w; cv.height = h;
     const ctx = cv.getContext("2d", { willReadFrequently: true });
     ctx.drawImage(v, 0, 0, w, h);
     const a = ctx.getImageData(0, 0, w, h).data;
     let minA = 255;
     for (let i = 3; i < a.length; i += 4) if (a[i] < minA) minA = a[i];
     return minA > 250;
-  } catch {
-    // Шинжлэх боломжгүй (CORS/decoder) үед аюулгүй тал руугаа → OPAQUE гэж үзнэ.
-    return true;
-  }
+  } catch { return true; }
 }
 
 /* ========= Location match helpers ========= */
@@ -262,7 +256,7 @@ function distanceMeters(a, b) {
   const R = 6371000, toRad = (x) => (x * Math.PI) / 180;
   const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
   const la1 = toRad(a.lat), la2 = toRad(b.lat);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(Math.abs(dLng) / 2) ** 2;
+  const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(Math.abs(dLng)/2)**2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 async function isWithinQrLocation(pos, qrLocId, fallbackRadius = DEFAULT_LOC_RADIUS_M) {
@@ -279,9 +273,7 @@ async function isWithinQrLocation(pos, qrLocId, fallbackRadius = DEFAULT_LOC_RAD
 }
 
 /* ========= Format & source helpers ========= */
-function cleanUrl(u = "") {
-  return (String(u || "").trim().replace(/^['"]+|['"]+$/g, "") || null);
-}
+function cleanUrl(u = "") { return (String(u || "").trim().replace(/^['"]+|['"]+$/g, "") || null); }
 function normFormat(x = "") {
   const s = String(x).toLowerCase();
   if (s.includes("webm")) return "webm";
@@ -290,11 +282,8 @@ function normFormat(x = "") {
   return s;
 }
 function extFromUrl(u = "") {
-  try {
-    return (new URL(u).pathname.match(/\.([a-z0-9]+)$/i)?.[1] || "").toLowerCase();
-  } catch {
-    return "";
-  }
+  try { return (new URL(u).pathname.match(/\.([a-z0-9]+)$/i)?.[1] || "").toLowerCase(); }
+  catch { return ""; }
 }
 
 // Firestore doc: { url, format }
@@ -309,7 +298,6 @@ function pickSourcesFromDoc(doc) {
   if (ext === "webm") out.webm = url;
   else if (ext === "mp4" || ext === "mov") { if (hasSbsTag) out.mp4_sbs = url; else out.mp4 = url; }
 
-  // fallback: format талбар
   if (!out.webm && !out.mp4_sbs && !out.mp4) {
     const fmt = normFormat(doc?.format || "");
     if (fmt === "webm") out.webm = url;
@@ -329,21 +317,13 @@ function isSbsVideo(doc, vEl) {
   const tagStr = (doc?.name || "") + " " + (doc?.url || "");
   if (/(?:^|[_-])sbs(?:[_-]|\.|$)/i.test(tagStr)) return true;
   const w = vEl?.videoWidth || 0, h = vEl?.videoHeight || 0;
-  if (w && h) {
-    const r = w / h;
-    if (r > 1.9 && r < 2.1) return true;
-  }
+  if (w && h) { const r = w / h; if (r > 1.9 && r < 2.1) return true; }
   return false;
 }
 
 // -------- Cloudinary seek hack ----------
-function isCloudinary(u) {
-  try { return /res\.cloudinary\.com/.test(new URL(u).host); } catch { return false; }
-}
-function withSeekHack(u) {
-  if (!u) return u;
-  return isCloudinary(u) ? u + (u.includes("#") ? "" : "#t=0.001") : u;
-}
+function isCloudinary(u) { try { return /res\.cloudinary\.com/.test(new URL(u).host); } catch { return false; } }
+function withSeekHack(u) { if (!u) return u; return isCloudinary(u) ? u + (u.includes("#") ? "" : "#t=0.001") : u; }
 
 // Candidates for device
 function pickBestForDevice({ webm, mp4_sbs, mp4 }) {
@@ -560,20 +540,12 @@ async function updateRegHeartbeat(phone, pos) {
       },
       { merge: true }
     );
-  } catch (e) {
-    dbg("updateRegHeartbeat failed:", e?.code || e?.message || e);
-  }
+  } catch (e) { dbg("updateRegHeartbeat failed:", e?.code || e?.message || e); }
 }
 
 // ---- DeviceKey (uid-с ангид) ----
-async function makeDeviceKeyBytes() {
-  const b = new Uint8Array(32);
-  crypto.getRandomValues(b);
-  return b;
-}
-function b64(buf) {
-  return btoa(String.fromCharCode(...buf));
-}
+async function makeDeviceKeyBytes() { const b = new Uint8Array(32); crypto.getRandomValues(b); return b; }
+function b64(buf) { return btoa(String.fromCharCode(...buf)); }
 function fromB64(s) {
   const bin = atob(s);
   const out = new Uint8Array(bin.length);
@@ -601,12 +573,7 @@ async function bindDeviceToPhone(phone) {
   const hashHex = await sha256Hex(devBytes);
 
   await setDoc(doc(db, "device_keys", hashHex), { phone, createdAt: serverTimestamp() }, { merge: true });
-
-  await setDoc(
-    doc(db, "phone_regs", phone),
-    { deviceKeyHashes: arrayUnion(hashHex) },
-    { merge: true }
-  );
+  await setDoc(doc(db, "phone_regs", phone), { deviceKeyHashes: arrayUnion(hashHex) }, { merge: true });
 
   dbg("Device bound:", hashHex.slice(0, 12), "… =>", phone);
 }
@@ -632,10 +599,7 @@ let REG_INFO = null;
 let gateWired = false;
 let gateBusy = false;
 function showPhoneGate() {
-  // Gate гармагц камера асаахыг оролдоно
-  (async () => {
-    try { await ensureCameraOnce(); } catch (e) { dbg("camera at gate:", e?.message || e); }
-  })();
+  (async () => { try { await ensureCameraOnce(); } catch (e) { dbg("camera at gate:", e?.message || e); } })();
 
   otpGate.hidden = false;
   if (otpCodeWrap) otpCodeWrap.hidden = true;
@@ -643,127 +607,88 @@ function showPhoneGate() {
   if (gateWired) return;
   gateWired = true;
 
-  btnSendCode?.addEventListener(
-    "click",
-    async () => {
-      if (gateBusy) return;
-      gateBusy = true;
-      btnSendCode.disabled = true;
+  btnSendCode?.addEventListener("click", async () => {
+    if (gateBusy) return;
+    gateBusy = true;
+    btnSendCode.disabled = true;
+    try {
+      otpError.textContent = "";
+      const phone = normalizeMnPhone(otpPhoneEl.value.trim());
+      if (!auth.currentUser) await signInAnonymously(auth).catch(() => {});
+
+      // 1) GPS
+      let pos;
       try {
-        otpError.textContent = "";
-        const phone = normalizeMnPhone(otpPhoneEl.value.trim());
-        if (!auth.currentUser) await signInAnonymously(auth).catch(() => {});
+        pos = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 });
+        dbg("Gate position:", fmtLoc(pos));
+      } catch (e) {
+        otpError.textContent = e?.code === 1 ? "Байршлын зөвшөөрөл хэрэгтэй байна." : "Байршил олдсонгүй.";
+        setTimeout(() => { otpError.textContent = ""; }, 3500);
+        return;
+      }
 
-        // 1) GPS
-        let pos;
-        try {
-          pos = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 });
-          dbg("Gate position:", fmtLoc(pos));
-        } catch (e) {
-          otpError.textContent = e?.code === 1 ? "Байршлын зөвшөөрөл хэрэгтэй байна." : "Байршил олдсонгүй.";
-          setTimeout(() => { otpError.textContent = ""; }, 3500);
-          return;
-        }
+      // 2) Давхардсан эсэх
+      const ref = doc(db, "phone_regs", phone);
+      const snap = await getDoc(ref).catch(() => null);
+      if (snap && snap.exists()) {
+        await updateRegHeartbeat(phone, pos);
 
-        // 2) Урьдчилан шалгах: давхардсан эсэх
-        const ref = doc(db, "phone_regs", phone);
-        const snap = await getDoc(ref).catch(() => null);
-        if (snap && snap.exists()) {
-          // ✅ Давхардсан: шинэ doc үүсгэхгүй, heartbeat + лог хийгээд шууд оруулна
-          await updateRegHeartbeat(phone, pos);
-
-          const chkOld = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
-          await logScan({
-            phone,
-            loc: QR_LOC_ID,
-            pos,
-            ua: navigator.userAgent,
-            decision: {
-              ok: chkOld.ok,
-              dist: Math.round(chkOld.dist || 0),
-              radius: chkOld.radius,
-              buffer: Math.round(chkOld.buffer || 0),
-              reason: chkOld.reason,
-            },
-          });
-
-          otpGate.hidden = true;
-          otpPhoneEl.value = "";
-          if (!window.__introStarted) {
-            window.__introStarted = true;
-            await startIntroFlow(true);
-          }
-          return;
-        }
-
-        // 3) ШИНЭ бүртгэл — setDoc (+ lastSeenAt эхний утга)
-        try {
-          await setDoc(
-            ref,
-            {
-              phone,
-              uid: auth.currentUser?.uid || null,
-              source: "webar",
-              createdAt: serverTimestamp(),
-              lastSeenAt: serverTimestamp(), // NEW
-              ua: navigator.userAgent.slice(0, 1000),
-              lat: Number(pos.coords.latitude),
-              lng: Number(pos.coords.longitude),
-              accuracy: Number(pos.coords.accuracy ?? 0),
-              qrId: QR_LOC_ID || null,
-              lastQrId: QR_LOC_ID || null, // NEW (сүүлд үзсэн QR)
-            },
-            { merge: false }
-          );
-
-          REG_INFO = { phone, docId: phone };
-
-          // Төхөөрөмжийг phone-той холбох
-          await bindDeviceToPhone(phone);
-        } catch (e) {
-          console.error("setDoc failed:", e);
-          otpError.textContent =
-            e?.code === "permission-denied"
-              ? "Бүртгэх эрх байхгүй байна (rules-аа шалгана уу)."
-              : e?.message || "Бүртгэл амжилтгүй";
-          setTimeout(() => { otpError.textContent = ""; }, 3500);
-          return;
-        }
-
-        // 4) Лог + нэвтрүүлэх
-        const chk = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
-        dbg("Gate decision:", chk);
+        const chkOld = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
         await logScan({
-          phone,
-          loc: QR_LOC_ID,
-          pos,
-          ua: navigator.userAgent,
-          decision: {
-            ok: chk.ok,
-            dist: Math.round(chk.dist || 0),
-            radius: chk.radius,
-            buffer: Math.round(chk.buffer || 0),
-            reason: chk.reason,
-          },
+          phone, loc: QR_LOC_ID, pos, ua: navigator.userAgent,
+          decision: { ok: chkOld.ok, dist: Math.round(chkOld.dist || 0), radius: chkOld.radius, buffer: Math.round(chkOld.buffer || 0), reason: chkOld.reason },
         });
 
         otpGate.hidden = true;
         otpPhoneEl.value = "";
-        if (!window.__introStarted) {
-          window.__introStarted = true;
-          await startIntroFlow(true);
-        }
-      } catch (e) {
-        console.error(e);
-        otpError.textContent = e?.message || "Бүртгэл амжилтгүй";
-        setTimeout(() => { otpError.textContent = ""; }, 3500);
-      } finally {
-        gateBusy = false;
-        btnSendCode.disabled = false;
+        if (!window.__introStarted) { window.__introStarted = true; await startIntroFlow(true); }
+        return;
       }
-    },
-    { passive: true }
-  );
+
+      // 3) ШИНЭ бүртгэл
+      try {
+        await setDoc(
+          ref,
+          {
+            phone, uid: auth.currentUser?.uid || null, source: "webar",
+            createdAt: serverTimestamp(), lastSeenAt: serverTimestamp(),
+            ua: navigator.userAgent.slice(0, 1000),
+            lat: Number(pos.coords.latitude), lng: Number(pos.coords.longitude),
+            accuracy: Number(pos.coords.accuracy ?? 0),
+            qrId: QR_LOC_ID || null, lastQrId: QR_LOC_ID || null,
+          },
+          { merge: false }
+        );
+        REG_INFO = { phone, docId: phone };
+        await bindDeviceToPhone(phone);
+      } catch (e) {
+        console.error("setDoc failed:", e);
+        otpError.textContent =
+          e?.code === "permission-denied" ? "Бүртгэх эрх байхгүй байна (rules-аа шалгана уу)." : e?.message || "Бүртгэл амжилтгүй";
+        setTimeout(() => { otpError.textContent = ""; }, 3500);
+        return;
+      }
+
+      // 4) Лог
+      const chk = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
+      dbg("Gate decision:", chk);
+      await logScan({
+        phone, loc: QR_LOC_ID, pos, ua: navigator.userAgent,
+        decision: { ok: chk.ok, dist: Math.round(chk.dist || 0), radius: chk.radius, buffer: Math.round(chk.buffer || 0), reason: chk.reason },
+      });
+
+      otpGate.hidden = true;
+      otpPhoneEl.value = "";
+      if (!window.__introStarted) { window.__introStarted = true; await startIntroFlow(true); }
+    } catch (e) {
+      console.error(e);
+      otpError.textContent = e?.message || "Бүртгэл амжилтгүй";
+      setTimeout(() => { otpError.textContent = ""; }, 3500);
+    } finally {
+      gateBusy = false;
+      btnSendCode.disabled = false;
+    }
+  }, { passive: true });
 }
 
 /* ========= Init: gate эсвэл шууд оруулах ========= */
@@ -774,10 +699,8 @@ async function initGateOrAutoEnter() {
     dbg("Boot pos:", fmtLoc(pos));
   } catch {}
 
-  // deviceKey-ээр бүртгэл шалгах
   const reg = await getRegistrationByDeviceKey();
 
-  // QR орчны шалгалт
   let chk = null;
   if (QR_LOC_ID && pos) {
     chk = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
@@ -787,56 +710,45 @@ async function initGateOrAutoEnter() {
   if (reg) {
     REG_INFO = reg;
     otpGate.hidden = true;
-
-    // ✅ Авто оролт дээр heartbeat
     try { await updateRegHeartbeat(reg.phone, pos); } catch {}
-
-    // Камер заавал асаана
     try { await ensureCameraOnce(); } catch (e) { dbg("camera start failed:", e?.message || e); }
-
-    if (!window.__introStarted) {
-      window.__introStarted = true;
-      await startIntroFlow(true);
-    }
+    if (!window.__introStarted) { window.__introStarted = true; await startIntroFlow(true); }
   } else {
     showPhoneGate();
   }
 
   await logScan({
-    phone: reg?.phone || null,
-    loc: QR_LOC_ID,
-    pos,
-    ua: navigator.userAgent,
-    decision: chk
-      ? { ok: chk.ok, dist: Math.round(chk.dist || 0), radius: chk.radius, buffer: Math.round(chk.buffer || 0), reason: chk.reason }
-      : null,
+    phone: reg?.phone || null, loc: QR_LOC_ID, pos, ua: navigator.userAgent,
+    decision: chk ? { ok: chk.ok, dist: Math.round(chk.dist || 0), radius: chk.radius, buffer: Math.round(chk.buffer || 0), reason: chk.reason } : null,
   });
 }
 
 /* ========= main ========= */
 await initAR();
 
-// Ачаалмагц камера асаахыг оролдоно
-try {
-  await ensureCameraOnce();
-  dbg("camera started at boot");
-} catch (e) {
-  dbg("camera start at boot failed:", e?.message || e);
-}
+// Boot дээр camera оролдох (gesture-гүй үед зөвхөн оролдлого)
+try { await ensureCameraOnce(); dbg("camera started at boot"); }
+catch (e) { dbg("camera start at boot failed:", e?.message || e); }
 
 await signInAnonymously(auth).catch(() => {});
-
-// Видео элементүүдийг decoding-д бэлэн болгоно
 makeVideoDecodeFriendly(vIntro);
 makeVideoDecodeFriendly(vEx);
-
-// Нэвтрэх эсэхийг deviceKey-ээр шалгаад, лог хийнэ
 await initGateOrAutoEnter();
 
+// iOS: эхний tap дээр permission + camera + flow
 tapLay.addEventListener("pointerdown", async () => {
   tapLay.style.display = "none";
   try {
-    // Товших мөчид камер дахин асаах оролдлого (iOS gesture-д тустай)
+    try {
+      await ensurePermissionsGate();
+      dbg("Permission gate OK");
+    } catch(e){
+      dbg("Permission gate failed:", e?.message||e);
+      alert(e?.message || "Зөвшөөрөл амжилтгүй.");
+      tapLay.style.display = "flex";
+      return;
+    }
+
     try { await ensureCameraOnce(); } catch (e) { dbg("camera on tap:", e?.message || e); }
 
     if (!window.__introStarted) {
@@ -845,9 +757,7 @@ tapLay.addEventListener("pointerdown", async () => {
     } else if (!introLoading && currentVideo) {
       await safePlay(currentVideo);
     }
-  } catch (e) {
-    dbg("after tap failed:", e?.message || e);
-  }
+  } catch (e) { dbg("after tap failed:", e?.message || e); }
 });
 
 // Меню товч
@@ -862,22 +772,33 @@ onFrame(() => {
   }
 });
 
+// iOS autoplay/visibility хамгаалалт
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState === "visible" && currentVideo) {
+    try { await safePlay(currentVideo); } catch {}
+  }
+});
+window.addEventListener("pageshow", async () => {
+  if (currentVideo && currentVideo.paused) {
+    try { await safePlay(currentVideo); } catch {}
+  }
+});
+
 /* ========= Plane visibility helpers (anti-white-flash) ========= */
 function hidePlane() {
   import("./ar.js").then(({ plane }) => {
     if (!plane) return;
     plane.visible = false;
-    if (plane.material) 
-      {
-        plane.material.colorWrite = false;
-        plane.material.opacity = 0;
-        plane.material.needsUpdate = true;
-      }
+    if (plane.material) {
+      plane.material.colorWrite = false;
+      plane.material.opacity = 0;
+      plane.material.needsUpdate = true;
+    }
   });
 }
 async function revealPlaneWhenReady(v) {
   try {
-    await waitReady(v, 2); // HAVE_CURRENT_DATA
+    await waitReady(v, 2);
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   } catch {}
   import("./ar.js").then(({ plane }) => {
@@ -907,11 +828,8 @@ async function startIntroFlow(fromTap = false) {
       if (QR_LOC_ID) {
         const posNow = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 }).catch(() => null);
         const chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
-        if (chk.ok) {
-          await startExerciseDirect();
-        } else {
-          dbg(`Exercise locked: not within location. dist=${Math.round(chk?.dist || -1)} > allowed=${chk?.radius}+${Math.round(chk?.buffer || 0)}`);
-        }
+        if (chk.ok) { await startExerciseDirect(); }
+        else { dbg(`Exercise locked: not within location. dist=${Math.round(chk?.dist || -1)} > allowed=${chk?.radius}+${Math.round(chk?.buffer || 0)}`); }
       }
       return;
     }
@@ -927,10 +845,7 @@ async function startIntroFlow(fromTap = false) {
       dbg("IntroFlow within?", chk);
       if (chk.ok) {
         exDoc = await fetchLatestExerciseFor(QR_LOC_ID);
-        if (exDoc) {
-          exSrc = pickSourcesFromDoc(exDoc);
-          dbg("Exercise sources:", exSrc);
-        }
+        if (exDoc) { exSrc = pickSourcesFromDoc(exDoc); dbg("Exercise sources:", exSrc); }
       } else {
         const name = chk?.loc?.name || QR_LOC_ID;
         dbg(`Exercise locked: need near "${name}". dist=${Math.round(chk?.dist || -1)} > allowed=${chk?.radius}+${Math.round(chk?.buffer || 0)}`);
@@ -943,9 +858,7 @@ async function startIntroFlow(fromTap = false) {
     const introKind = await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4, introSrc.mp4_sbs);
     if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, exSrc.mp4_sbs);
 
-    if (vIntro.readyState < 1) {
-      await new Promise((r) => vIntro.addEventListener("loadedmetadata", r, { once: true }));
-    }
+    if (vIntro.readyState < 1) { await new Promise((r) => vIntro.addEventListener("loadedmetadata", r, { once: true })); }
     const texIntro = videoTexture(vIntro);
     texIntro.needsUpdate = true;
     vIntro.__threeVideoTex = texIntro;
@@ -958,12 +871,11 @@ async function startIntroFlow(fromTap = false) {
     const looksOpaqueIntro = await videoLooksOpaque(vIntro);
     if (looksOpaqueIntro && useIntroKind === "alpha") useIntroKind = "flat";
 
-    if (useIntroKind === "sbs" || isSbsVideo(introDoc, vIntro)) {
-      planeUseShader(texIntro);
-    } else if (useIntroKind === "alpha") {
-      planeUseMap(texIntro);
+    // === Material select → CHROMA KEY default ===
+    if (useIntroKind === "alpha") {
+      planeUseMap(texIntro); // жинхэнэ alpha (VP8/HEVC alpha) тохиолдолд
     } else {
-      planeUseLumaKey(texIntro, { cut: 0.08, feather: 0.2, gamma: 0.85 });
+      planeUseChroma(texIntro, { keyColor: 0x00ff00, similarity: 0.32, smoothness: 0.08, spill: 0.18 });
     }
 
     fitPlaneToVideo(vIntro);
@@ -976,39 +888,27 @@ async function startIntroFlow(fromTap = false) {
       btnUnmute.style.display = "none";
     } catch {}
     if (vIntro.paused) {
-      try {
-        vIntro.muted = true;
-        await safePlay(vIntro);
-        btnUnmute.style.display = "inline-block";
-      } catch {}
+      try { vIntro.muted = true; await safePlay(vIntro); btnUnmute.style.display = "inline-block"; } catch {}
     }
 
     applyScale();
     dbg("intro playing…");
 
-    // анхны фрэйм decode болсны дараа ил болгоно
     await revealPlaneWhenReady(vIntro);
 
     try {
       startGeoWatch((pos, err) => {
-        if (err) {
-          dbg("GPS watch error:", err?.message || err);
-          return;
-        }
+        if (err) { dbg("GPS watch error:", err?.message || err); return; }
         dbg("Watch", fmtLoc(pos));
       });
-    } catch (e) {
-      dbg("GPS watch failed:", e?.message || e);
-    }
+    } catch (e) { dbg("GPS watch failed:", e?.message || e); }
 
     vIntro.onended = () => {
       try { ["ibExercise", "ibGrowth", "ibKnowledge"].forEach((id) => document.getElementById(id)?.classList.add("mini")); } catch {}
       showMenuOverlay();
       dbg("intro ended → menu shown; sticky UI");
     };
-  } finally {
-    introLoading = false;
-  }
+  } finally { introLoading = false; }
 }
 
 async function startExerciseDirect() {
@@ -1040,27 +940,22 @@ async function startExerciseDirect() {
 
     const exKind = await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, exSrc.mp4_sbs);
 
-    if (vEx.readyState < 1) {
-      await new Promise((r) => vEx.addEventListener("loadedmetadata", r, { once: true }));
-    }
+    if (vEx.readyState < 1) { await new Promise((r) => vEx.addEventListener("loadedmetadata", r, { once: true })); }
     const texEx = videoTexture(vEx);
     texEx.needsUpdate = true;
     vEx.__threeVideoTex = texEx;
 
-    // plane-г нууж авна
     hidePlane();
 
-    // opaque sniff
     let useExKind = exKind;
     const looksOpaqueEx = await videoLooksOpaque(vEx);
     if (looksOpaqueEx && useExKind === "alpha") useExKind = "flat";
 
-    if (useExKind === "sbs" || isSbsVideo(exDoc, vEx)) {
-      planeUseShader(texEx);
-    } else if (useExKind === "alpha") {
+    // === Material select → CHROMA KEY default ===
+    if (useExKind === "alpha") {
       planeUseMap(texEx);
     } else {
-      planeUseLumaKey(texEx, { cut: 0.08, feather: 0.2, gamma: 0.85 });
+      planeUseChroma(texEx, { keyColor: 0x00ff00, similarity: 0.32, smoothness: 0.08, spill: 0.18 });
     }
 
     fitPlaneToVideo(vEx);
@@ -1074,19 +969,13 @@ async function startExerciseDirect() {
       btnUnmute.style.display = "none";
     } catch {}
     if (vEx.paused) {
-      try {
-        vEx.muted = true;
-        await safePlay(vEx);
-        btnUnmute.style.display = "inline-block";
-      } catch {}
+      try { vEx.muted = true; await safePlay(vEx); btnUnmute.style.display = "inline-block"; } catch {}
     }
 
     await revealPlaneWhenReady(vEx);
 
     dbg("exercise playing (AR, no menu).");
-  } finally {
-    exLoading = false;
-  }
+  } finally { exLoading = false; }
 }
 
 /* ========= helpers (texture→material) ========= */
@@ -1100,10 +989,19 @@ function planeUseMap(tex) {
     plane.material.needsUpdate = true;
   });
 }
-function planeUseShader(tex) {
+function planeUseShader(tex) { // SBS-alpha хэрэглэх үед
   import("./ar.js").then(({ plane, makeSbsAlphaMaterial }) => {
     plane.material?.dispose?.();
     plane.material = makeSbsAlphaMaterial(tex);
+    plane.material.transparent = true;
+    plane.material.depthWrite = false;
+    plane.material.needsUpdate = true;
+  });
+}
+function planeUseChroma(tex, opts) {
+  import("./ar.js").then(({ plane, makeChromaKeyMaterial }) => {
+    plane.material?.dispose?.();
+    plane.material = makeChromaKeyMaterial(tex, opts);
     plane.material.transparent = true;
     plane.material.depthWrite = false;
     plane.material.needsUpdate = true;

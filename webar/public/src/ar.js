@@ -278,6 +278,69 @@ export function makeLumaKeyMaterial(
       }`,
   });
 }
+// --- ADD in ar.js ---
+export function makeChromaKeyMaterial(tex, opts = {}) {
+  const {
+    keyColor = 0x00ff00,   // ногоон
+    similarity = 0.32,     // 0.1–0.6 (ихсэх тусам илүү устгана)
+    smoothness = 0.08,     // 0.0–0.2 (ирмэг зөөлрөл)
+    spill = 0.18,          // 0.0–0.4 (ногоон асгаралт дарах)
+  } = opts;
+
+  const mat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: {
+      map: { value: tex },
+      uKey: { value: new THREE.Color(keyColor).toArray().slice(0,3) },
+      uSimilarity: { value: similarity },
+      uSmoothness: { value: smoothness },
+      uSpill: { value: spill },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main(){
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+      }`,
+    fragmentShader: `
+      uniform sampler2D map;
+      uniform vec3 uKey;
+      uniform float uSimilarity;
+      uniform float uSmoothness;
+      uniform float uSpill;
+      varying vec2 vUv;
+
+      // RGB->YCbCr (BT.601)
+      vec3 rgb2ycbcr(vec3 c){
+        float y  = 0.299*c.r + 0.587*c.g + 0.114*c.b;
+        float cb = -0.168736*c.r - 0.331264*c.g + 0.5*c.b + 0.5;
+        float cr = 0.5*c.r - 0.418688*c.g - 0.081312*c.b + 0.5;
+        return vec3(y,cb,cr);
+      }
+
+      void main(){
+        vec4 src = texture2D(map, vUv);
+        vec3 ycc = rgb2ycbcr(src.rgb);
+        vec3 key = rgb2ycbcr(uKey);
+
+        // зай (CbCr хавтгай дээр)
+        float dist = distance(ycc.yz, key.yz);
+
+        // alpha: similarity & smoothness
+        float a = 1.0 - smoothstep(uSimilarity - uSmoothness, uSimilarity + uSmoothness, dist);
+
+        // spill reduction
+        float spillMask = smoothstep(uSimilarity, uSimilarity + uSmoothness, dist);
+        vec3 col = src.rgb;
+        col.g = mix(col.g, (col.r + col.b) * 0.5, uSpill * (1.0 - spillMask));
+
+        gl_FragColor = vec4(col, a);
+      }`,
+  });
+  return mat;
+}
+
 
 export function applyLumaKey(tex, opts) {
   plane.material?.dispose?.();
