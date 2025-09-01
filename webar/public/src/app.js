@@ -18,7 +18,7 @@ import {
 
 const dbg = (...a) => (_dbg ? _dbg("[AR]", ...a) : console.log("[AR]", ...a));
 
-// ==== Swallow "play() was interrupted..." ====
+// ==== swallow "play() was interrupted..." so it won't crash ====
 window.addEventListener("unhandledrejection", (e) => {
   const r = e?.reason;
   const msg = String(r?.message || r || "");
@@ -153,34 +153,85 @@ function logVideoError(v, tag = "video") {
   } catch {}
 }
 
-/* ========= iOS permission gate (NEW) ========= */
-function isiOSUA(){ return /iPad|iPhone|iPod/.test(navigator.userAgent); }
-function explainIOSSettings(kind="camera"){
-  const app = "Safari";
-  const path = kind==="location" ? `${app} > Location > While Using the App` : `${app} > Camera > Allow`;
-  return isiOSUA() ? `iOS дээр ${path} тохиргоог зөвшөөрөөрэй.` : `Тохиргоон дотроос ${kind} зөвшөөрлөө идэвхжүүлнэ үү.`;
-}
-async function requestCameraOnce(){
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error("Камер ашиглах боломжгүй төхөөрөмж.");
-  try {
-    const s = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
-    s.getTracks().forEach(t=>t.stop());
-    return true;
-  } catch(e){
-    if (e?.name==="NotAllowedError") throw new Error("Камерын зөвшөөрөл хориглогдсон. " + explainIOSSettings("camera"));
-    if (e?.name==="NotFoundError") throw new Error("Камер олдсонгүй.");
-    throw new Error("Камер асаалт амжилтгүй: " + (e?.message||e));
+/* ========= iOS permission gate ========= */
+// — найдвартай camerа permission (timeout + олон fallback)
+async function requestCameraOnce() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("Камер ашиглах боломжгүй төхөөрөмж.");
   }
+
+  const tryWithTimeout = (constraints, label) =>
+    new Promise((resolve, reject) => {
+      let timedOut = false;
+      const t = setTimeout(() => {
+        timedOut = true;
+        reject(new Error(`Camera request timed out: ${label}`));
+      }, 6000);
+
+      dbg("asking camera permission…", label);
+      navigator.mediaDevices.getUserMedia(constraints).then(
+        (stream) => {
+          if (timedOut) {
+            try { stream.getTracks().forEach(tr => tr.stop()); } catch {}
+            return;
+          }
+          clearTimeout(t);
+          resolve(stream);
+        },
+        (err) => {
+          clearTimeout(t);
+          reject(err);
+        }
+      );
+    });
+
+  const attempts = [
+    [{ video: true, audio: false }, "video:true"],
+    [{ video: { facingMode: "user" }, audio: false }, "facing:user"],
+    [{ video: { facingMode: "environment" }, audio: false }, "facing:environment"],
+    [{ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }, "ideal 1280x720"],
+  ];
+
+  let lastErr;
+  for (const [constraints, label] of attempts) {
+    try {
+      const s = await tryWithTimeout(constraints, label);
+      try { s.getTracks().forEach(tr => tr.stop()); } catch {}
+      return true;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+
+  const name = lastErr?.name;
+  if (name === "NotAllowedError") {
+    throw new Error(
+      "Камерын зөвшөөрөл хаалттай байна. Settings → Safari → Camera → Allow (эсвэл Ask) болгож, хуудсаа Refresh хийнэ үү."
+    );
+  }
+  if (name === "NotFoundError") {
+    throw new Error("Камер олдсонгүй. Бусад апп камер ашиглаж байгаа эсэхээ шалгаад дахин оролдоно уу.");
+  }
+  throw new Error("Камерт хандах боломжгүй: " + (lastErr?.message || lastErr));
 }
-async function requestGeoOnceUI(){
-  try { return await getGeoOnce({ enableHighAccuracy:true, timeout:15000 }); }
-  catch(e){
-    if (e?.code===1) throw new Error("Байршлын зөвшөөрөл хэрэгтэй. " + explainIOSSettings("location"));
-    if (e?.code===2) throw new Error("GPS дохио сул байна. Илүү нээлттэй газар дахин оролдоно уу.");
+
+function explainIOSSettings(kind = "camera") {
+  const app = "Safari";
+  const path = kind === "location" ? `${app} > Location > While Using the App` : `${app} > Camera > Allow`;
+  return isIOS ? `iOS дээр ${path} тохиргоог зөвшөөрөөрэй.` : `Тохиргоон дотроос ${kind} зөвшөөрлөө идэвхжүүлнэ үү.`;
+}
+
+async function requestGeoOnceUI() {
+  try {
+    return await getGeoOnce({ enableHighAccuracy: true, timeout: 15000 });
+  } catch (e) {
+    if (e?.code === 1) throw new Error("Байршлын зөвшөөрөл хэрэгтэй. " + explainIOSSettings("location"));
+    if (e?.code === 2) throw new Error("GPS дохио сул байна. Илүү нээлттэй газар дахин оролдоно уу.");
     throw new Error("Байршил олдсонгүй. Сүлжээ/GPS-ээ шалгана уу.");
   }
 }
-async function ensurePermissionsGate(){
+
+async function ensurePermissionsGate() {
   await requestCameraOnce();
   const pos = await requestGeoOnceUI();
   return pos;
@@ -599,8 +650,10 @@ let REG_INFO = null;
 let gateWired = false;
 let gateBusy = false;
 function showPhoneGate() {
-  (async () => { try { await ensureCameraOnce(); } catch (e) { dbg("camera at gate:", e?.message || e); } })();
-
+  // iOS дээр gesture-ээс өмнө camera асаах оролдлого хийж болохгүй
+  if (!isIOS) {
+    (async () => { try { await ensureCameraOnce(); } catch (e) { dbg("camera at gate:", e?.message || e); } })();
+  }
   otpGate.hidden = false;
   if (otpCodeWrap) otpCodeWrap.hidden = true;
   if (btnSendCode) btnSendCode.textContent = "Бүртгэх";
@@ -710,9 +763,15 @@ async function initGateOrAutoEnter() {
   if (reg) {
     REG_INFO = reg;
     otpGate.hidden = true;
+
     try { await updateRegHeartbeat(reg.phone, pos); } catch {}
-    try { await ensureCameraOnce(); } catch (e) { dbg("camera start failed:", e?.message || e); }
-    if (!window.__introStarted) { window.__introStarted = true; await startIntroFlow(true); }
+    // iOS дээр gesture-ээс өмнө camera асаахгүй
+    if (!isIOS) { try { await ensureCameraOnce(); } catch (e) { dbg("camera start failed:", e?.message || e); } }
+
+    if (!window.__introStarted) {
+      window.__introStarted = true;
+      await startIntroFlow(true);
+    }
   } else {
     showPhoneGate();
   }
@@ -726,9 +785,11 @@ async function initGateOrAutoEnter() {
 /* ========= main ========= */
 await initAR();
 
-// Boot дээр camera оролдох (gesture-гүй үед зөвхөн оролдлого)
-try { await ensureCameraOnce(); dbg("camera started at boot"); }
-catch (e) { dbg("camera start at boot failed:", e?.message || e); }
+// Boot дээр camera оролдлого: iOS дээр алгасна
+if (!isIOS) {
+  try { await ensureCameraOnce(); dbg("camera started at boot"); }
+  catch (e) { dbg("camera start at boot failed:", e?.message || e); }
+}
 
 await signInAnonymously(auth).catch(() => {});
 makeVideoDecodeFriendly(vIntro);
