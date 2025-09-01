@@ -5,22 +5,27 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
   <title>WebAR — Intro → Меню → Дасгал</title>
 
-  <!-- Main styles -->
+  <!-- iOS/PWA найрсаг нэмэлтүүд -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="theme-color" content="#000000">
+
+  <!-- Гол stylesheet -->
   <link rel="stylesheet" href="./styles/main.css">
 
-  <!-- ✅ Service Worker cache унтраах (хуучин vendor түгжихээс сэргийлнэ) -->
+  <!-- ✅ Хуучин service worker-уудыг унтраана -->
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations?.().then(rs => rs.forEach(r => r.unregister()));
     }
   </script>
 
-  <!-- Vendor (UMD) -->
+  <!-- Vendor (CDN) -->
   <script src="https://unpkg.com/three@0.152.2/build/three.min.js" defer></script>
-  <!-- ✅ ЛОКАЛ vendor-аа больж UMD-ийг CDN-ээс яг энэ хувилбараар ачаал -->
   <script src="https://unpkg.com/@zappar/zappar-threejs@2.5.2/umd/zappar-threejs.js" defer></script>
 
-  <!-- Vendor бэлэн болмогц Promise-аар авах -->
+  <!-- Vendor бэлэн болмогц -->
   <script>
     window.__depsReady = new Promise(res => addEventListener('load', () => {
       res({ THREE: window.THREE, ZapparThree: window.ZapparThree });
@@ -28,6 +33,8 @@
   </script>
 </head>
 <body>
+  <!-- ✔️ iOS дээрх явцыг харуулах статус мөр -->
+  <div id="debugStatus" style="position:fixed;left:16px;top:16px;color:#6cf;font:12px/1.4 monospace;z-index:9999"></div>
   <div id="debug">DEBUG: boot…</div>
 
   <!-- Tap-to-start -->
@@ -62,7 +69,10 @@
     <div class="otp-panel">
       <h3 class="otp-title">баталгаажуулалт</h3>
       <p class="otp-sub">Утасны дугаараа оруулж 6 оронтой кодоор баталгаажуулна уу.</p>
-      <div class="otp-field"><span>+976</span><input id="otpPhone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="Утасны дугаар (8 цифр)" maxlength="8"></div>
+      <div class="otp-field">
+        <span>+976</span>
+        <input id="otpPhone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="Утасны дугаар (8 цифр)" maxlength="8">
+      </div>
       <button id="btnSendCode" class="btn full">Код авах</button>
       <div id="otpCodeWrap" class="otp-code-wrap" hidden>
         <div class="otp-inputs" id="otpInputs"></div>
@@ -77,30 +87,23 @@
   </div>
 
   <!-- Hidden videos -->
-<!-- Hidden videos -->
-<video
-  id="vidIntro"
-  playsinline
-  playsInline
-  autoplay
-  muted
-  preload="auto"
-  crossorigin="anonymous"
-  hidden
-></video>
+  <video
+    id="vidIntro"
+    playsinline webkit-playsinline
+    autoplay muted
+    preload="auto"
+    crossorigin="anonymous"
+    hidden
+  ></video>
 
-<video
-  id="vidExercise"
-  playsinline
-  playsInline
-  autoplay
-  muted
-  loop
-  preload="auto"
-  crossorigin="anonymous"
-  hidden
-></video>
-
+  <video
+    id="vidExercise"
+    playsinline webkit-playsinline
+    autoplay muted loop
+    preload="auto"
+    crossorigin="anonymous"
+    hidden
+  ></video>
 
   <!-- Танай модулиуд -->
   <script type="module" src="./src/app.js"></script>
