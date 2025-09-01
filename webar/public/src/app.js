@@ -18,7 +18,7 @@ import {
 
 const dbg = (...a) => (_dbg ? _dbg("[AR]", ...a) : console.log("[AR]", ...a));
 
-// ==== swallow "play() was interrupted..." so it won't crash ====
+/* ===== Swallow "play() was interrupted..." ===== */
 window.addEventListener("unhandledrejection", (e) => {
   const r = e?.reason;
   const msg = String(r?.message || r || "");
@@ -28,12 +28,12 @@ window.addEventListener("unhandledrejection", (e) => {
   }
 });
 
-// ======= Config =======
+/* ===== Config ===== */
 const ALLOW_DUPLICATE_TO_ENTER = false;
 const DEFAULT_LOC_RADIUS_M = 200;
 const ACCURACY_BUFFER_MAX = 75;
 
-// 🔗 Firebase (ESM CDN)
+/* ===== Firebase (ESM CDN) ===== */
 import { firebaseConfig } from "./firebase.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
@@ -52,7 +52,7 @@ import {
   arrayUnion,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-/* ========= Geolocation helpers ========= */
+/* ===== Geolocation helpers ===== */
 let geoWatchId = null;
 function canGeolocate() { return "geolocation" in navigator; }
 function getGeoOnce(options = {}) {
@@ -84,7 +84,7 @@ function fmtLoc(pos) {
   return `GPS lat=${latitude?.toFixed(6)} lng=${longitude?.toFixed(6)} ±${Math.round(accuracy || 0)}m`;
 }
 
-/* ========= Query param ========= */
+/* ===== Query param ===== */
 function getQueryParam(name) {
   const u = new URL(window.location.href);
   return u.searchParams.get(name) || "";
@@ -92,7 +92,7 @@ function getQueryParam(name) {
 const QR_LOC_ID = getQueryParam("loc") || "";
 dbg("QR loc =", QR_LOC_ID || "(none)");
 
-/* ========= Phone normalize (MN) ========= */
+/* ===== Phone normalize (MN) ===== */
 function normalizeMnPhone(raw = "") {
   const digits = String(raw).replace(/\D/g, "");
   if (/^\+976\d{8}$/.test(raw)) return raw;
@@ -101,7 +101,7 @@ function normalizeMnPhone(raw = "") {
   throw new Error("Утасны дугаар буруу байна. (+976XXXXXXXX хэлбэр)");
 }
 
-/* ========= DOM ========= */
+/* ===== DOM ===== */
 const vIntro = document.getElementById("vidIntro");
 const vEx = document.getElementById("vidExercise");
 const btnUnmute = document.getElementById("btnUnmute");
@@ -116,12 +116,12 @@ let currentVideo = null;
 let introLoading = false;
 let exLoading = false;
 
-/* ========= Firebase ========= */
+/* ===== Firebase ===== */
 const fbApp = initializeApp(firebaseConfig);
 const auth = getAuth(fbApp);
 const db = getFirestore(fbApp);
 
-/* ========= Media / GL diagnostics ========= */
+/* ===== Media / GL diagnostics ===== */
 const MEDIA_ERR = {
   1: "MEDIA_ERR_ABORTED (user/JS aborted)",
   2: "MEDIA_ERR_NETWORK (download/network)",
@@ -153,66 +153,134 @@ function logVideoError(v, tag = "video") {
   } catch {}
 }
 
-/* ========= iOS permission gate ========= */
-// — найдвартай camerа permission (timeout + олон fallback)
+/* ======================================================================= */
+/* ======================  iOS permission gate (NEW)  ===================== */
+/* ======================================================================= */
+
+let CAM_REQ_IN_FLIGHT = false;
+let CAM_PROMPTED = false;
+
+/** enumerateDevices нь зарим тохиолдолд (VPN/Private Relay/Incognito) хоосон ирдэг тул NotFound-г илрүүлж өгнө */
+async function thereIsCameraDevice() {
+  try {
+    if (!navigator.mediaDevices?.enumerateDevices) return true; // боломжгүй бол алгасъя
+    const list = await navigator.mediaDevices.enumerateDevices();
+    const hasVideo = list.some((d) => d.kind === "videoinput");
+    if (!hasVideo) dbg("enumerateDevices: no videoinput found");
+    return hasVideo || isIOS; // iOS ихэнхдээ хоосон буудаг – шууд true болгосон
+  } catch {
+    return true;
+  }
+}
+
+/** permissions.query боломжтой бол төлөвөө харуулна (debug-д хэрэгтэй) */
+async function logPermissionStates() {
+  if (!navigator.permissions?.query) return;
+  const names = ["camera", "geolocation"];
+  for (const n of names) {
+    try {
+      const st = await navigator.permissions.query({ name: n });
+      dbg(`perm[${n}] =`, st.state);
+    } catch {}
+  }
+}
+
+/** Камерын хүсэлтийг ганц сувгаар, таймауттай + фолбэктэй явуулна */
 async function requestCameraOnce() {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("Камер ашиглах боломжгүй төхөөрөмж.");
   }
 
-  const tryWithTimeout = (constraints, label) =>
-    new Promise((resolve, reject) => {
-      let timedOut = false;
-      const t = setTimeout(() => {
-        timedOut = true;
-        reject(new Error(`Camera request timed out: ${label}`));
-      }, 6000);
+  await logPermissionStates();
 
-      dbg("asking camera permission…", label);
+  // permissions.query == denied бол шууд тайлбартай алдаа
+  if (navigator.permissions?.query) {
+    try {
+      const st = await navigator.permissions.query({ name: "camera" });
+      if (st.state === "denied") {
+        throw new Error("Камерын зөвшөөрөл хаалттай байна. Settings → Safari → Camera → Allow (эсвэл Ask) болгож, хуудсаа Refresh хийнэ үү.");
+      }
+    } catch {}
+  }
+
+  if (CAM_PROMPTED) {
+    dbg("camera already prompted – skip duplicate getUserMedia");
+    return true;
+  }
+  if (CAM_REQ_IN_FLIGHT) {
+    dbg("camera request in-flight – wait");
+    await new Promise((r) => {
+      const id = setInterval(() => {
+        if (!CAM_REQ_IN_FLIGHT) { clearInterval(id); r(); }
+      }, 50);
+    });
+    return CAM_PROMPTED;
+  }
+
+  if (!(await thereIsCameraDevice())) {
+    throw new Error("Камер олдсонгүй. Өөр апп камер ашиглаж байгаа эсэхээ шалгаад дахин оролдоно уу.");
+  }
+
+  CAM_REQ_IN_FLIGHT = true;
+
+  const tryWithTimeout = (constraints, label, ms = 12000) =>
+    new Promise((resolve, reject) => {
+      let done = false;
+      const to = setTimeout(() => {
+        if (!done) {
+          done = true;
+          reject(new Error(`Camera request timed out: ${label}`));
+        }
+      }, ms);
+
+      dbg("getUserMedia →", label);
       navigator.mediaDevices.getUserMedia(constraints).then(
         (stream) => {
-          if (timedOut) {
-            try { stream.getTracks().forEach(tr => tr.stop()); } catch {}
-            return;
-          }
-          clearTimeout(t);
+          if (done) { try { stream.getTracks().forEach(t => t.stop()); } catch {}; return; }
+          clearTimeout(to);
+          done = true;
           resolve(stream);
         },
         (err) => {
-          clearTimeout(t);
+          if (done) return;
+          clearTimeout(to);
+          done = true;
           reject(err);
         }
       );
     });
 
   const attempts = [
+    [{ video: { facingMode: { ideal: "environment" } }, audio: false }, "env-ideal"],
     [{ video: true, audio: false }, "video:true"],
-    [{ video: { facingMode: "user" }, audio: false }, "facing:user"],
-    [{ video: { facingMode: "environment" }, audio: false }, "facing:environment"],
-    [{ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }, "ideal 1280x720"],
+    [{ video: { facingMode: "user" }, audio: false }, "user"],
+    [{ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }, "1280x720"],
   ];
 
   let lastErr;
-  for (const [constraints, label] of attempts) {
-    try {
-      const s = await tryWithTimeout(constraints, label);
-      try { s.getTracks().forEach(tr => tr.stop()); } catch {}
-      return true;
-    } catch (e) {
-      lastErr = e;
+  try {
+    for (const [c, label] of attempts) {
+      try {
+        const s = await tryWithTimeout(c, label);
+        CAM_PROMPTED = true;
+        try { s.getTracks().forEach((t) => t.stop()); } catch {}
+        return true;
+      } catch (e) {
+        lastErr = e;
+        dbg("camera attempt failed:", label, e?.name || e?.message || e);
+      }
     }
+    const name = lastErr?.name;
+    if (name === "NotAllowedError") {
+      throw new Error("Камерын зөвшөөрөл хаалттай байна. Settings → Safari → Camera → Allow (эсвэл Ask) болгож, хуудсаа Refresh хийнэ үү.");
+    }
+    if (name === "NotFoundError") {
+      throw new Error("Камер олдсонгүй. Өөр апп камер ашиглаж байгаа эсэхээ шалгаад дахин оролдоно уу.");
+    }
+    throw new Error("Камерт хандах боломжгүй: " + (lastErr?.message || lastErr));
+  } finally {
+    CAM_REQ_IN_FLIGHT = false;
   }
-
-  const name = lastErr?.name;
-  if (name === "NotAllowedError") {
-    throw new Error(
-      "Камерын зөвшөөрөл хаалттай байна. Settings → Safari → Camera → Allow (эсвэл Ask) болгож, хуудсаа Refresh хийнэ үү."
-    );
-  }
-  if (name === "NotFoundError") {
-    throw new Error("Камер олдсонгүй. Бусад апп камер ашиглаж байгаа эсэхээ шалгаад дахин оролдоно уу.");
-  }
-  throw new Error("Камерт хандах боломжгүй: " + (lastErr?.message || lastErr));
 }
 
 function explainIOSSettings(kind = "camera") {
@@ -231,13 +299,14 @@ async function requestGeoOnceUI() {
   }
 }
 
+/** Gesture дээр: CAMERA → LOCATION (дараалалтай, давхцахгүй) */
 async function ensurePermissionsGate() {
   await requestCameraOnce();
   const pos = await requestGeoOnceUI();
   return pos;
 }
 
-/* ========= helpers ========= */
+/* ===== helpers ===== */
 async function safePlay(v) {
   if (!v) return;
   try { await v.play(); }
@@ -253,7 +322,7 @@ function makeVideoDecodeFriendly(v) {
   } catch {}
 }
 
-// ensureCamera() → once/cache
+/* ===== ensureCamera once/cache ===== */
 let __camPromise = null;
 async function ensureCameraOnce() {
   if (__camPromise) return __camPromise;
@@ -295,7 +364,7 @@ async function videoLooksOpaque(v) {
   } catch { return true; }
 }
 
-/* ========= Location match helpers ========= */
+/* ===== Location match helpers ===== */
 async function fetchLocationById(id) {
   if (!id) return null;
   const d = await getDoc(doc(db, "locations", id)).catch(() => null);
@@ -323,7 +392,7 @@ async function isWithinQrLocation(pos, qrLocId, fallbackRadius = DEFAULT_LOC_RAD
   return { ok, reason: ok ? "ok" : "too-far", loc, dist, radius, buffer };
 }
 
-/* ========= Format & source helpers ========= */
+/* ===== Format & source helpers ===== */
 function cleanUrl(u = "") { return (String(u || "").trim().replace(/^['"]+|['"]+$/g, "") || null); }
 function normFormat(x = "") {
   const s = String(x).toLowerCase();
@@ -372,21 +441,21 @@ function isSbsVideo(doc, vEl) {
   return false;
 }
 
-// -------- Cloudinary seek hack ----------
+/* ---- Cloudinary seek hack ---- */
 function isCloudinary(u) { try { return /res\.cloudinary\.com/.test(new URL(u).host); } catch { return false; } }
 function withSeekHack(u) { if (!u) return u; return isCloudinary(u) ? u + (u.includes("#") ? "" : "#t=0.001") : u; }
 
-// Candidates for device
+/* Candidates for device */
 function pickBestForDevice({ webm, mp4_sbs, mp4 }) {
   const v = document.createElement("video");
   const can = (t) => !!v.canPlayType && v.canPlayType(t).replace(/no/, "");
-  const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const isiOSUA = /iPad|iPhone|iPod/.test(navigator.userAgent);
 
   const webmOK = webm && (can('video/webm; codecs="vp8,opus"') || can("video/webm"));
   const sbsOK = mp4_sbs && can("video/mp4");
   const mp4OK = mp4 && can("video/mp4");
 
-  if (isiOS) {
+  if (isiOSUA) {
     const list = [];
     if (sbsOK) list.push({ url: mp4_sbs, type: "video/mp4", kind: "sbs" });
     if (mp4OK) list.push({ url: mp4, type: "video/mp4", kind: "flat" });
@@ -399,7 +468,7 @@ function pickBestForDevice({ webm, mp4_sbs, mp4 }) {
   return list;
 }
 
-/* ========= Robust video loader ========= */
+/* ===== Robust video loader ===== */
 async function setSourcesAwait(v, webm, mp4, mp4_sbs) {
   try { v.pause?.(); } catch {}
   v.removeAttribute("src");
@@ -505,7 +574,7 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs) {
   throw lastErr || new Error("video load failed");
 }
 
-// Debug events
+/* ===== Debug events ===== */
 function wireVideoDebug(v, tag) {
   const log = (ev) =>
     dbg(`[${tag}]`, ev.type, "t=", (v.currentTime || 0).toFixed(2), "rs=", v.readyState, "ns=", v.networkState);
@@ -517,7 +586,7 @@ function wireVideoDebug(v, tag) {
   v.addEventListener("error", () => logVideoError(v, tag));
 }
 
-/* ========= Firestore queries ========= */
+/* ===== Firestore queries ===== */
 async function fetchLatestIntro() {
   const qs = [
     fsQuery(collection(db, "videos"), where("active", "==", true), where("isGlobal", "==", true), limit(1)),
@@ -576,7 +645,7 @@ async function logScan({ phone, loc, pos, ua, decision }) {
   }
 }
 
-/* ====== phone_regs heartbeat (NEW) ====== */
+/* ===== phone_regs heartbeat ===== */
 async function updateRegHeartbeat(phone, pos) {
   if (!phone) return;
   try {
@@ -594,7 +663,7 @@ async function updateRegHeartbeat(phone, pos) {
   } catch (e) { dbg("updateRegHeartbeat failed:", e?.code || e?.message || e); }
 }
 
-// ---- DeviceKey (uid-с ангид) ----
+/* ---- DeviceKey (uid-с ангид) ---- */
 async function makeDeviceKeyBytes() { const b = new Uint8Array(32); crypto.getRandomValues(b); return b; }
 function b64(buf) { return btoa(String.fromCharCode(...buf)); }
 function fromB64(s) {
@@ -643,10 +712,10 @@ async function getRegistrationByDeviceKey() {
   return null;
 }
 
-// Локал төлөв
+/* ===== Локал төлөв ===== */
 let REG_INFO = null;
 
-/* ========= Phone gate ========= */
+/* ===== Phone gate ===== */
 let gateWired = false;
 let gateBusy = false;
 function showPhoneGate() {
@@ -744,7 +813,7 @@ function showPhoneGate() {
   }, { passive: true });
 }
 
-/* ========= Init: gate эсвэл шууд оруулах ========= */
+/* ===== Init: gate эсвэл шууд оруулах ===== */
 async function initGateOrAutoEnter() {
   let pos = null;
   try {
@@ -782,10 +851,10 @@ async function initGateOrAutoEnter() {
   });
 }
 
-/* ========= main ========= */
+/* ===== main ===== */
 await initAR();
 
-// Boot дээр camera оролдлого: iOS дээр алгасна
+// Boot оролдлого: iOS дээр алгасна (gesture хүртэл хүлээнэ)
 if (!isIOS) {
   try { await ensureCameraOnce(); dbg("camera started at boot"); }
   catch (e) { dbg("camera start at boot failed:", e?.message || e); }
@@ -796,12 +865,12 @@ makeVideoDecodeFriendly(vIntro);
 makeVideoDecodeFriendly(vEx);
 await initGateOrAutoEnter();
 
-// iOS: эхний tap дээр permission + camera + flow
+/* ===== iOS: эхний tap дээр permission + camera + flow ===== */
 tapLay.addEventListener("pointerdown", async () => {
   tapLay.style.display = "none";
   try {
     try {
-      await ensurePermissionsGate();
+      await ensurePermissionsGate(); // CAMERA -> GEO (дараалалтай)
       dbg("Permission gate OK");
     } catch(e){
       dbg("Permission gate failed:", e?.message||e);
@@ -821,10 +890,10 @@ tapLay.addEventListener("pointerdown", async () => {
   } catch (e) { dbg("after tap failed:", e?.message || e); }
 });
 
-// Меню товч
+/* ===== Меню товч ===== */
 document.getElementById("mExercise")?.addEventListener("click", startExerciseDirect);
 
-// Интро үед world-tracked UI-г update + frame safeguard
+/* ===== Интро үед UI + frame safeguard ===== */
 onFrame(() => {
   if (currentVideo === vIntro) updateIntroButtons();
   const v = currentVideo;
@@ -833,7 +902,7 @@ onFrame(() => {
   }
 });
 
-// iOS autoplay/visibility хамгаалалт
+/* ===== iOS autoplay/visibility хамгаалалт ===== */
 document.addEventListener("visibilitychange", async () => {
   if (document.visibilityState === "visible" && currentVideo) {
     try { await safePlay(currentVideo); } catch {}
@@ -845,7 +914,7 @@ window.addEventListener("pageshow", async () => {
   }
 });
 
-/* ========= Plane visibility helpers (anti-white-flash) ========= */
+/* ===== Plane visibility helpers (anti-white-flash) ===== */
 function hidePlane() {
   import("./ar.js").then(({ plane }) => {
     if (!plane) return;
@@ -873,7 +942,7 @@ async function revealPlaneWhenReady(v) {
   });
 }
 
-/* ========= Flows ========= */
+/* ===== Flows ===== */
 async function startIntroFlow(fromTap = false) {
   if (introLoading) return;
   introLoading = true;
@@ -934,7 +1003,7 @@ async function startIntroFlow(fromTap = false) {
 
     // === Material select → CHROMA KEY default ===
     if (useIntroKind === "alpha") {
-      planeUseMap(texIntro); // жинхэнэ alpha (VP8/HEVC alpha) тохиолдолд
+      planeUseMap(texIntro); // VP8/HEVC alpha
     } else {
       planeUseChroma(texIntro, { keyColor: 0x00ff00, similarity: 0.32, smoothness: 0.08, spill: 0.18 });
     }
@@ -1039,7 +1108,7 @@ async function startExerciseDirect() {
   } finally { exLoading = false; }
 }
 
-/* ========= helpers (texture→material) ========= */
+/* ===== texture→material ===== */
 function planeUseMap(tex) {
   import("./ar.js").then(({ plane }) => {
     plane.material.map = tex;
@@ -1050,7 +1119,7 @@ function planeUseMap(tex) {
     plane.material.needsUpdate = true;
   });
 }
-function planeUseShader(tex) { // SBS-alpha хэрэглэх үед
+function planeUseShader(tex) { // SBS-alpha үед
   import("./ar.js").then(({ plane, makeSbsAlphaMaterial }) => {
     plane.material?.dispose?.();
     plane.material = makeSbsAlphaMaterial(tex);
@@ -1069,7 +1138,7 @@ function planeUseChroma(tex, opts) {
   });
 }
 
-/* ========= Unmute ========= */
+/* ===== Unmute ===== */
 btnUnmute.addEventListener("click", async () => {
   try {
     if (!currentVideo) return;
