@@ -31,6 +31,39 @@
       res({ THREE: window.THREE, ZapparThree: window.ZapparThree });
     }, { once:true }));
   </script>
+
+  <!-- Permission Overlay CSS (минимал, харанхуй сэдэв) -->
+  <style>
+    .perm-overlay{
+      position:fixed; inset:0; z-index:99999;
+      display:grid; place-items:center;
+      background:rgba(0,0,0,.84);
+      backdrop-filter: blur(2px);
+    }
+    .perm-card{
+      width:min(92vw,560px);
+      background:#0b0f14; color:#e7eef7;
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:16px; padding:28px 24px;
+      box-shadow:0 12px 40px rgba(0,0,0,.45);
+      text-align:center;
+    }
+    .perm-title{ margin:0 0 10px; font-size:24px; font-weight:800; }
+    .perm-text{ margin:0 0 18px; line-height:1.6; color:#c9d6e2; }
+    .perm-actions{ display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin:6px 0 10px; }
+    .perm-btn{
+      appearance:none; border:1px solid transparent; border-radius:12px;
+      padding:12px 16px; font-size:15px; font-weight:700; cursor:pointer;
+      transition:transform .08s ease, box-shadow .2s ease, background .2s ease;
+    }
+    .perm-btn.primary{ background:#2f6bff; color:#fff; box-shadow:0 6px 16px rgba(47,107,255,.35); }
+    .perm-btn.primary:active{ transform:translateY(1px); }
+    .perm-btn.ghost{ background:transparent; color:#e7eef7; border-color:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.18); }
+    .perm-help{ margin-top:10px; color:#b9c7d6; text-align:left; }
+    .perm-help summary{ cursor:pointer; }
+    .perm-help ol{ margin:10px 0 0 18px; }
+    .hidden{ display:none !important; }
+  </style>
 </head>
 <body>
   <!-- ✔️ iOS дээрх явцыг харуулах статус мөр -->
@@ -105,7 +138,66 @@
     hidden
   ></video>
 
+  <!-- ✅ Permission Overlay (монгол) -->
+  <div id="permOverlay" class="perm-overlay" aria-modal="true" role="dialog">
+    <div class="perm-card">
+      <h2 class="perm-title">Бараг болчихлоо…</h2>
+      <p class="perm-text">
+        Энэ нэмэгдсэн бодит байдлын (AR) туршлагыг үзүүлэхийн тулд таны төхөөрөмжийн
+        <strong>камер</strong> болон <strong>байршлын</strong> мэдрэгчид рүү нэвтрэх зөвшөөрөл хэрэгтэй.
+      </p>
+      <div class="perm-actions">
+        <button id="btnGrant" class="perm-btn primary">ЗӨВШӨӨРӨХ</button>
+        <button id="btnLater" class="perm-btn ghost">Дараа асуу</button>
+      </div>
+      <details class="perm-help">
+        <summary>iPhone/iPad дээр зөвшөөрөх заавар</summary>
+        <ol>
+          <li>Settings → <b>Safari</b> → <b>Camera</b> → <b>Allow</b> (эсвэл <b>Ask</b>)</li>
+          <li>Settings → <b>Safari</b> → <b>Location</b> → <b>While Using the App</b></li>
+          <li>Дараа нь хуудсаа <b>Refresh</b> хийнэ.</li>
+        </ol>
+      </details>
+    </div>
+  </div>
+
   <!-- Танай модулиуд -->
   <script type="module" src="./src/app.js"></script>
+
+  <!-- Overlay-г app.js-тэй холбох жижиг модуль -->
+  <script type="module">
+    // App-ийн tap-to-start handler аль хэдийн pointerdown дээр permission flow-г нээдэг.
+    // Тиймээс Grant дархад tapToStart дээрх gesture-ийг хиймэлээр өдөөе.
+    const overlay   = document.getElementById('permOverlay');
+    const grantBtn  = document.getElementById('btnGrant');
+    const laterBtn  = document.getElementById('btnLater');
+    const tapLayer  = document.getElementById('tapToStart');
+
+    function triggerTapStart(){
+      try{
+        // tap layer харагдахгүй байсан ч listener нь байгаа — event л хэрэгтэй
+        const ev = new PointerEvent('pointerdown', { bubbles:true });
+        tapLayer?.dispatchEvent(ev);
+      }catch(_){}
+    }
+
+    grantBtn?.addEventListener('click', () => {
+      overlay?.classList.add('hidden');
+      // permission flow → app.js доторх tap handler руу шилжүүлнэ
+      triggerTapStart();
+    }, { passive:true });
+
+    laterBtn?.addEventListener('click', () => {
+      overlay?.classList.add('hidden');
+      // хэрэглэгч дараа зөвшөөрөхөөр болвол үндсэн tap layer-ийг харагддаг болгоё
+      if (tapLayer) tapLayer.style.display = 'flex';
+    }, { passive:true });
+
+    // Хэрэв танайд бүртгэлтэй төхөөрөмж бөгөөд app.js автоматаар эхлүүлдэг бол overlay-г хааж болно.
+    // window.__autoEntered = true гэх мэт флагийг app.js-ээс тавьж болно.
+    if (window.__autoEntered) {
+      overlay?.classList.add('hidden');
+    }
+  </script>
 </body>
 </html>
