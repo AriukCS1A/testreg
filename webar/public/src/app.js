@@ -154,7 +154,7 @@ function logVideoError(v, tag = "video") {
 }
 
 /* ======================================================================= */
-/* ======================  iOS permission gate (NEW)  ===================== */
+/* ======================  Permission gate (шинэ)  ======================== */
 /* ======================================================================= */
 
 let CAM_REQ_IN_FLIGHT = false;
@@ -166,7 +166,7 @@ async function thereIsCameraDevice() {
     const list = await navigator.mediaDevices.enumerateDevices();
     const hasVideo = list.some((d) => d.kind === "videoinput");
     if (!hasVideo) dbg("enumerateDevices: no videoinput found");
-    return hasVideo || isIOS; // iOS ихэнхдээ хоосон буудаг – true
+    return hasVideo || isIOS; // iOS ихэнхдээ хоосон – true гэж үзье
   } catch { return true; }
 }
 
@@ -179,7 +179,6 @@ async function logPermissionStates() {
 
 async function requestCameraOnce() {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error("Камер ашиглах боломжгүй төхөөрөмж.");
-
   await logPermissionStates();
 
   if (navigator.permissions?.query) {
@@ -222,14 +221,12 @@ async function requestCameraOnce() {
     });
 
   const attempts = [
-  // ✅ эхний оролдлого: rear-г яг таг (exact) шаардана
-  [{ video: { facingMode: { exact: "environment" } }, audio: false }, "env-exact"],
-  // дараагийн fallback-ууд
-  [{ video: { facingMode: { ideal: "environment" } }, audio: false }, "env-ideal"],
-  [{ video: true, audio: false }, "video:true"],
-  [{ video: { facingMode: "user" }, audio: false }, "user"],
-  [{ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }, "1280x720"],
-];
+    [{ video: { facingMode: { exact: "environment" } }, audio: false }, "env-exact"],
+    [{ video: { facingMode: { ideal: "environment" } }, audio: false }, "env-ideal"],
+    [{ video: true, audio: false }, "video:true"],
+    [{ video: { facingMode: "user" }, audio: false }, "user"],
+    [{ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }, "1280x720"],
+  ];
 
   let lastErr;
   try {
@@ -248,26 +245,37 @@ async function requestCameraOnce() {
   } finally { CAM_REQ_IN_FLIGHT = false; }
 }
 
-function explainIOSSettings(kind = "camera") {
-  const app = "Safari";
-  const path = kind === "location" ? `${app} > Location > While Using the App` : `${app} > Camera > Allow`;
-  return isIOS ? `iOS дээр ${path} тохиргоог зөвшөөрөөрэй.` : `Тохиргоон дотроос ${kind} зөвшөөрлөө идэвхжүүлнэ үү.`;
+/* --- GEO-г gesture дотор эхлүүлэх тусдаа wrapper (await ХИЙХГҮЙ эхлүүлдэг) --- */
+function requestGeoInGesture(opts = {}) {
+  return new Promise((resolve, reject) => {
+    try {
+      navigator.geolocation.getCurrentPosition(
+        resolve,
+        reject,
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0, ...opts }
+      );
+    } catch (e) { reject(e); }
+  });
 }
 
-async function requestGeoOnceUI() {
-  try { return await getGeoOnce({ enableHighAccuracy: true, timeout: 15000 }); }
-  catch (e) {
-    if (e?.code === 1) throw new Error("Байршлын зөвшөөрөл хэрэгтэй. " + explainIOSSettings("location"));
-    if (e?.code === 2) throw new Error("GPS дохио сул байна. Илүү нээлттэй газар дахин оролдоно уу.");
-    throw new Error("Байршил олдсонгүй. Сүлжээ/GPS-ээ шалгана уу.");
-  }
-}
-
-/** Gesture дээр: CAMERA → LOCATION (дараалалтай, давхцахгүй) */
+/** ✅ НЭГ gesture дээр CAMERA + GEO-г зэрэг эхлүүлээд дараа нь хамтад нь хүлээнэ */
 async function ensurePermissionsGate() {
-  await requestCameraOnce();
-  const pos = await requestGeoOnceUI();
-  return pos;
+  // Эхлүүлэх үед ямар ч await БҮҮ хий – popup-ууд тэгж байж гарна
+  const geoP = requestGeoInGesture();   // Location popup асаана
+  const camP = requestCameraOnce();     // Camera popup асаана
+
+  try {
+    const [_cam, pos] = await Promise.all([
+      camP.catch(e => { throw e; }),
+      geoP.catch(e => { throw e; }),
+    ]);
+    return pos;
+  } catch (e) {
+    // Алдааг Монгол тайлбартай болгоод цааш шиднэ
+    if (e?.code === 1) throw new Error("Байршлын зөвшөөрөл хэрэгтэй. Settings → Safari → Location → While Using the App болгож, дахин оролдоно уу.");
+    if (e?.code === 2) throw new Error("GPS дохио сул байна. Илүү нээлттэй газар дахин оролдоно уу.");
+    throw new Error(e?.message || "Зөвшөөрөл амжилтгүй.");
+  }
 }
 
 /* ===== helpers ===== */
@@ -446,7 +454,7 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs) {
 
   makeVideoDecodeFriendly(v);
 
-  if (isIOS === true) webm = null; // iOS дээр webm бүр мөсөн унтрах
+  if (isIOS === true) webm = null; // iOS дээр webm унтраах
 
   const base = pickBestForDevice({ webm, mp4_sbs, mp4 });
   if (!base.length) throw new Error("No playable sources for this device");
@@ -631,7 +639,12 @@ async function updateRegHeartbeat(phone, pos) {
 /* ---- DeviceKey (uid-с ангид) ---- */
 async function makeDeviceKeyBytes() { const b = new Uint8Array(32); crypto.getRandomValues(b); return b; }
 function b64(buf) { return btoa(String.fromCharCode(...buf)); }
-function fromB64(s) { const bin = atob(s); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
+function fromB64(s) {
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
 async function sha256Hex(bytes) {
   const dig = await crypto.subtle.digest("SHA-256", bytes);
   const arr = new Uint8Array(dig);
@@ -679,7 +692,6 @@ let REG_INFO = null;
 let gateWired = false;
 let gateBusy = false;
 function showPhoneGate() {
-  // ⛔️ Энд автоматаар камера асаах оролдлого хийхгүй
   otpGate.hidden = false;
   if (otpCodeWrap) otpCodeWrap.hidden = true;
   if (btnSendCode) btnSendCode.textContent = "Бүртгэх";
@@ -691,7 +703,7 @@ function showPhoneGate() {
     gateBusy = true;
     btnSendCode.disabled = true;
     try {
-      otpError.textContent = "";
+      otpError.textcontent = "";
       const phone = normalizeMnPhone(otpPhoneEl.value.trim());
       if (!auth.currentUser) await signInAnonymously(auth).catch(() => {});
 
@@ -772,38 +784,39 @@ function showPhoneGate() {
 
 /* ===== Init: gate эсвэл шууд оруулах ===== */
 async function initGateOrAutoEnter() {
-  // ❌ Boot дээр гео асуухгүй
+  // Boot дээр гео/камер асуухгүй
   let pos = null;
 
   const reg = await getRegistrationByDeviceKey();
-
-  // ❌ Гео шалгах/лог хийхийг хойшлуулав
   let chk = null;
 
   if (reg) {
     REG_INFO = reg;
     otpGate.hidden = true;
     try { await updateRegHeartbeat(reg.phone, pos); } catch {}
-    // Камерыг автоматаар асаахгүй, урсгал эхлүүлэхгүй
   } else {
     showPhoneGate();
   }
 
-  // Хөнгөн лог (байршилгүй)
   await logScan({
     phone: reg?.phone || null,
     loc: QR_LOC_ID,
-    pos, // null
+    pos,
     ua: navigator.userAgent,
-    decision: null,
+    decision: chk ? {
+      ok: chk.ok,
+      dist: Math.round(chk.dist || 0),
+      radius: chk.radius,
+      buffer: Math.round(chk.buffer || 0),
+      reason: chk.reason,
+    } : null,
   });
 }
-
 
 /* ===== main ===== */
 await initAR();
 
-// ❌ Boot дээр автоматаар камера асаах логик арилсан
+// Boot дээр автоматаар камера асаахгүй
 await signInAnonymously(auth).catch(() => {});
 makeVideoDecodeFriendly(vIntro);
 makeVideoDecodeFriendly(vEx);
@@ -814,7 +827,7 @@ tapLay.addEventListener("pointerdown", async () => {
   tapLay.style.display = "none";
   try {
     try {
-      await ensurePermissionsGate(); // CAMERA -> GEO
+      await ensurePermissionsGate(); // CAMERA + GEO-г нэг gesture-д
       dbg("Permission gate OK");
     } catch(e){
       dbg("Permission gate failed:", e?.message||e);
