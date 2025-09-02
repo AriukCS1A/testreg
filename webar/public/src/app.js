@@ -769,34 +769,33 @@ function showPhoneGate() {
 
 /* ===== Init: gate эсвэл шууд оруулах ===== */
 async function initGateOrAutoEnter() {
+  // ❌ Boot дээр гео асуухгүй
   let pos = null;
-  try {
-    pos = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 });
-    dbg("Boot pos:", fmtLoc(pos));
-  } catch {}
 
   const reg = await getRegistrationByDeviceKey();
 
+  // ❌ Гео шалгах/лог хийхийг хойшлуулав
   let chk = null;
-  if (QR_LOC_ID && pos) {
-    chk = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
-    dbg("Boot within?", chk);
-  }
 
   if (reg) {
     REG_INFO = reg;
     otpGate.hidden = true;
     try { await updateRegHeartbeat(reg.phone, pos); } catch {}
-    // ❌ Камерыг энд автоматаар асаахгүй, урсгалыг ч эхлүүлэхгүй
+    // Камерыг автоматаар асаахгүй, урсгал эхлүүлэхгүй
   } else {
     showPhoneGate();
   }
 
+  // Хөнгөн лог (байршилгүй)
   await logScan({
-    phone: reg?.phone || null, loc: QR_LOC_ID, pos, ua: navigator.userAgent,
-    decision: chk ? { ok: chk.ok, dist: Math.round(chk.dist || 0), radius: chk.radius, buffer: Math.round(chk.buffer || 0), reason: chk.reason } : null,
+    phone: reg?.phone || null,
+    loc: QR_LOC_ID,
+    pos, // null
+    ua: navigator.userAgent,
+    decision: null,
   });
 }
+
 
 /* ===== main ===== */
 await initAR();
@@ -1088,3 +1087,4 @@ btnUnmute.addEventListener("click", async () => {
 window.ensurePermissionsGate = ensurePermissionsGate;
 window.ensureCameraOnce = ensureCameraOnce;
 window.startIntroFlow = startIntroFlow;
+window.__appReady = true;

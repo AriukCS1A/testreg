@@ -163,31 +163,39 @@
   <script type="module" src="./src/app.js"></script>
 
   <!-- Overlay-г app.js-тэй холбох -->
-  <script type="module">
-    const overlay  = document.getElementById('permOverlay');
-    const grantBtn = document.getElementById('btnGrant');
-    const laterBtn = document.getElementById('btnLater');
+ <script type="module">
+  const overlay  = document.getElementById('permOverlay');
+  const grantBtn = document.getElementById('btnGrant');
+  const laterBtn = document.getElementById('btnLater');
 
-    async function runMglPermissionFlow() {
-      try {
-        // Танай app.js-аас байгаа ensurePermissionsGate ашиглана
-        await ensurePermissionsGate();
-        try { await ensureCameraOnce?.(); } catch(e){}
-        overlay?.classList.add('hidden');
-        if (!window.__introStarted) {
-          window.__introStarted = true;
-          await startIntroFlow?.(true);
+  async function waitApp() {
+    if (window.__appReady && window.ensurePermissionsGate) return;
+    await new Promise((res) => {
+      const id = setInterval(() => {
+        if (window.__appReady && window.ensurePermissionsGate) {
+          clearInterval(id); res();
         }
-      } catch(e) {
-        alert(e?.message || "Зөвшөөрөл амжилтгүй.");
-      }
-    }
+      }, 50);
+    });
+  }
 
-    grantBtn?.addEventListener('click', runMglPermissionFlow, { passive:true });
-    laterBtn?.addEventListener('click', () => {
-      overlay?.classList.add('hidden');
-      document.getElementById('tapToStart')?.style.setProperty('display','flex');
-    }, { passive:true });
-  </script>
+  grantBtn?.addEventListener('click', async () => {
+    overlay?.classList.add('hidden');
+    try {
+      await waitApp();                         // ← эндээс алдаа засагдана
+      await window.ensurePermissionsGate();    // CAMERA → GEO
+      await window.ensureCameraOnce();         // Zappar camera
+      await window.startIntroFlow(true);       // урсгал эхлүүлэх
+    } catch (e) {
+      alert(e?.message || e);
+    }
+  }, { passive:true });
+
+  laterBtn?.addEventListener('click', () => {
+    overlay?.classList.add('hidden');
+    // Хэрэглэгч дараа зөвшөөрөх бол зүгээр л хаана
+  }, { passive:true });
+</script>
+
 </body>
 </html>

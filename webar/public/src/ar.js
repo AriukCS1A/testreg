@@ -2,18 +2,18 @@
 import { VIDEO_ROT_Z } from "./config.js";
 import { dbg } from "./utils.js";
 
-let THREE, ZT; // ZapparThree (UMD-ээс)
+let THREE, ZT; // ZapparThree (UMD)
 export let renderer, camera, scene, tracker, anchor, plane;
 export let scaleFactor = 1.35;
 const MIN_S = 0.6, MAX_S = 3;
 
 let onFrameCb = null;
-let cameraStarted = false; // камераа нэг л удаа асаана
+let cameraStarted = false;
 
 // --- iOS WebView / Code Scanner илрүүлэх ---
 function looksLikeIOSWebView() {
   const ua = navigator.userAgent || "";
-  const isIOS = /iPad|iPhone|iPod/.test(ua);
+  const isIOS = /iPad|iPhone|iPod/i.test(ua);
   const hasWK = !!window.webkit?.messageHandlers;
   return isIOS && hasWK && !window.navigator.standalone;
 }
@@ -21,22 +21,14 @@ function looksLikeIOSWebView() {
 export async function initAR() {
   ({ THREE, ZapparThree: ZT } = await window.__depsReady);
 
-  if (!window.isSecureContext) {
-    dbg("site must be HTTPS/secure context for camera");
-  }
-
-  // ✅ Zappar-ын дотоод UI-г бүү дууд: зөвхөн шалгаад өөрсдөө шийднэ
+  if (!window.isSecureContext) dbg("site must be HTTPS/secure context for camera");
   if (ZT.browserIncompatible?.()) {
-    // Хэрэв хүсвэл энд өөрийн монгол overlay/alert харуулж болно
+    // Zappar-ийн дотоод UI-г оруулахгүй – бид өөрсдийн overlay ашиглаж байгаа
     throw new Error("Тухайн браузер AR-д тохирохгүй байна.");
   }
 
   // Renderer
-  renderer = new THREE.WebGLRenderer({
-    antialias: true,
-    alpha: true,
-    powerPreference: "high-performance",
-  });
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(innerWidth, innerHeight);
   renderer.setClearColor(0x000000, 0);
@@ -81,31 +73,25 @@ export async function initAR() {
     onFrameCb?.();
   });
 
-  // Pause/resume on visibility
+  // Pause/resume
   document.addEventListener("visibilitychange", () => {
     if (!cameraStarted) return;
     if (document.hidden) { try { camera.pause(); } catch {} }
     else { try { camera.start(); } catch {} }
   });
-  window.addEventListener("pageshow", () => { if (cameraStarted) try { camera.start(); } catch {} });
-  window.addEventListener("pagehide", () => { if (cameraStarted) try { camera.pause(); } catch {} });
+  addEventListener("pageshow", () => { if (cameraStarted) try { camera.start(); } catch {} });
+  addEventListener("pagehide", () => { if (cameraStarted) try { camera.pause(); } catch {} });
 
   // WebGL context guards
   const gl = renderer.getContext();
-  gl.canvas.addEventListener("webglcontextlost", (e) => {
-    e.preventDefault();
-    dbg("webgl context LOST");
-  });
+  gl.canvas.addEventListener("webglcontextlost", (e) => { e.preventDefault(); dbg("webgl context LOST"); });
   gl.canvas.addEventListener("webglcontextrestored", () => {
     ZT.glContextSet(renderer.getContext());
     scene.background = camera.backgroundTexture;
     renderer.setClearColor(0x000000, 0);
     if (plane) {
       plane.visible = false;
-      if (plane.material) {
-        plane.material.colorWrite = false;
-        plane.material.opacity = 0;
-      }
+      if (plane.material) { plane.material.colorWrite = false; plane.material.opacity = 0; }
     }
     if (cameraStarted) { try { camera.start(); } catch {} }
     dbg("webgl context RESTORED + camera restarted");
@@ -117,7 +103,7 @@ export async function initAR() {
 
 export function onFrame(cb) { onFrameCb = cb; }
 
-/* ===== Камер зөв асаалт (Зөвхөн системийн popup, Zappar UI ҮГҮЙ) ===== */
+/* ===== Камер зөв асаалт (Зөвхөн системийн popup) ===== */
 export async function ensureCamera() {
   if (cameraStarted) return;
 
@@ -127,29 +113,24 @@ export async function ensureCamera() {
 
   dbg("asking camera permission…");
   try {
-    // 1) Зөвшөөрөл шалгах
+    // Зарим хувилбарт permission API өөр байж болно → guard-тай
     let granted = true;
-    if (ZT.permissionGranted) {
-      granted = await ZT.permissionGranted();
-    }
+    if (ZT.permissionGranted) granted = await ZT.permissionGranted();
 
-    // 2) Байхгүй бол системийн popup-оор асууна (UI биш!)
-    if (!granted && ZT.permissionRequest) {
-      try {
-        await ZT.permissionRequest(); // системийн native permission dialog
+    if (!granted) {
+      if (ZT.permissionRequest) {
+        try { await ZT.permissionRequest(); } catch {}
         granted = await ZT.permissionGranted?.();
-      } catch (e) {
-        granted = false;
+      } else if (ZT.permissionRequestUI) {
+        // Ховор тохиолдолд зөвхөн UI нь байдаг; fallback болгож дуудах (монгол overlay-оос аль хэдийн хэрэглэгч даралт хийсэн тул OK)
+        try { await ZT.permissionRequestUI(); } catch {}
+        granted = await ZT.permissionGranted?.();
       }
     }
 
-    if (!granted) {
-      throw new Error("Камерын зөвшөөрөл хэрэгтэй. Тохиргоогоо шалгаад дахин оролдоно уу.");
-    }
+    if (!granted) throw new Error("Камерын зөвшөөрөл хэрэгтэй. Тохиргоогоо шалгаад дахин оролдоно уу.");
 
-    // 3) Камераа асаана (rear → fallback)
-    try { await camera.start(true); } catch { await camera.start(); }
-
+    try { await camera.start(true); } catch { await camera.start(); } // rear → fallback
     scene.background = camera.backgroundTexture;
     cameraStarted = true;
 
@@ -169,17 +150,11 @@ export function setSources(videoEl, webm = "", mp4 = "", forceMP4 = false) {
   videoEl.innerHTML = "";
 
   if (forceMP4 && mp4) {
-    const s = document.createElement("source");
-    s.src = mp4; s.type = "video/mp4";
-    videoEl.appendChild(s);
+    const s = document.createElement("source"); s.src = mp4; s.type = "video/mp4"; videoEl.appendChild(s);
   } else if (webm) {
-    const s = document.createElement("source");
-    s.src = webm; s.type = 'video/webm; codecs="vp8,opus"';
-    videoEl.appendChild(s);
+    const s = document.createElement("source"); s.src = webm; s.type = 'video/webm; codecs="vp8,opus"'; videoEl.appendChild(s);
   } else if (mp4) {
-    const s = document.createElement("source");
-    s.src = mp4; s.type = "video/mp4";
-    videoEl.appendChild(s);
+    const s = document.createElement("source"); s.src = mp4; s.type = "video/mp4"; videoEl.appendChild(s);
   }
 
   try { videoEl.load(); } catch {}
@@ -219,10 +194,132 @@ export function faceCameraNoRotate() {
   plane.rotation.z = VIDEO_ROT_Z;
 }
 
-// === Шэйдэр материалууд (таны одоогийн хэрэгжүүлэлт хэвээр үлдээгээрэй) ===
-export function makeSbsAlphaMaterial(tex) { /* ...таны одоогийн код хэвээр... */ }
-export function makeLumaKeyMaterial(tex, opts) { /* ... */ }
-export function makeChromaKeyMaterial(tex, opts) { /* ... */ }
+/* ================= Shader материалууд ================= */
+
+// SBS (Side-by-Side) зүүн талд RGB, баруун талд Alpha хадгалсан бичлэгийг тайлах материал
+export function makeSbsAlphaMaterial(tex) {
+  tex.needsUpdate = true;
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { mapTex: { value: tex } },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+      }`,
+    fragmentShader: `
+      precision mediump float;
+      uniform sampler2D mapTex;
+      varying vec2 vUv;
+      void main(){
+        // left = RGB, right = A (same y, x/2)
+        vec2 uvLeft  = vec2(vUv.x * 0.5, vUv.y);
+        vec2 uvRight = vec2(0.5 + vUv.x * 0.5, vUv.y);
+        vec4 rgb  = texture2D(mapTex, uvLeft);
+        float a   = texture2D(mapTex, uvRight).r; // alpha-г red сувагт хадгалсан гэж үзье
+        gl_FragColor = vec4(rgb.rgb, a);
+      }`,
+    transparent: true,
+    depthWrite: false,
+  });
+  return mat;
+}
+
+// Luma-key (цагаан дэвсгэрийг арилгах) – шаардлагатай үед
+export function makeLumaKeyMaterial(tex, opts = {}) {
+  const { threshold = 0.9, smoothness = 0.1 } = opts;
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      mapTex: { value: tex },
+      uThreshold: { value: threshold },
+      uSmooth: { value: smoothness },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+    fragmentShader: `
+      precision mediump float;
+      uniform sampler2D mapTex;
+      uniform float uThreshold;
+      uniform float uSmooth;
+      varying vec2 vUv;
+      void main(){
+        vec4 c = texture2D(mapTex, vUv);
+        float luma = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+        float a = smoothstep(uThreshold, uThreshold - uSmooth, luma);
+        gl_FragColor = vec4(c.rgb, a);
+      }`,
+    transparent: true,
+    depthWrite: false,
+  });
+  return mat;
+}
+
+// Chroma-key (ногоон дэлгэц)
+export function makeChromaKeyMaterial(tex, opts = {}) {
+  const {
+    keyColor = 0x00ff00,
+    similarity = 0.32,
+    smoothness = 0.08,
+    spill = 0.18,
+  } = opts;
+
+  const kc = [
+    ((keyColor >> 16) & 255) / 255,
+    ((keyColor >> 8) & 255) / 255,
+    (keyColor & 255) / 255,
+  ];
+
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      mapTex: { value: tex },
+      uKeyColor: { value: new THREE.Vector3(kc[0], kc[1], kc[2]) },
+      uSimilarity: { value: similarity },
+      uSmoothness: { value: smoothness },
+      uSpill: { value: spill },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+    fragmentShader: `
+      precision mediump float;
+      varying vec2 vUv;
+      uniform sampler2D mapTex;
+      uniform vec3  uKeyColor;
+      uniform float uSimilarity;
+      uniform float uSmoothness;
+      uniform float uSpill;
+
+      // RGB → YCbCr
+      vec3 rgb2ycbcr(vec3 c){
+        float y  = dot(c, vec3(0.2989, 0.5866, 0.1145));
+        float cb = (c.b - y) * 0.565;
+        float cr = (c.r - y) * 0.713;
+        return vec3(y, cb, cr);
+      }
+
+      void main(){
+        vec4 col = texture2D(mapTex, vUv);
+        vec3  k   = uKeyColor;
+        vec3  ycc = rgb2ycbcr(col.rgb);
+        vec3  kycc= rgb2ycbcr(k);
+
+        float dist = distance(ycc.yz, kycc.yz);
+        float edge0 = uSimilarity;
+        float edge1 = uSimilarity + uSmoothness;
+        float alpha = 1.0 - smoothstep(edge0, edge1, dist);
+
+        // spill-ийг дарах
+        float desat = clamp((dist - uSimilarity) / max(uSmoothness, 1e-5), 0.0, 1.0);
+        vec3  rgb   = mix(col.rgb, vec3(ycc.x), desat * uSpill);
+
+        gl_FragColor = vec4(rgb, alpha * col.a);
+      }`,
+    transparent: true,
+    depthWrite: false,
+  });
+  return mat;
+}
 
 export function applyLumaKey(tex, opts) {
   plane.material?.dispose?.();
@@ -237,10 +334,7 @@ export function worldToScreen(v) {
   if (!renderer || !camera) return { x: -9999, y: -9999 };
   const rect = renderer.domElement.getBoundingClientRect();
   const p = v.clone().project(camera);
-  return {
-    x: (p.x * 0.5 + 0.5) * rect.width + rect.left,
-    y: (-p.y * 0.5 + 0.5) * rect.height + rect.top,
-  };
+  return { x: (p.x * 0.5 + 0.5) * rect.width + rect.left, y: (-p.y * 0.5 + 0.5) * rect.height + rect.top };
 }
 
 export function localPointOnPlane(u, v) {
