@@ -32,7 +32,7 @@
     }, { once:true }));
   </script>
 
-  <!-- Permission Overlay CSS (минимал, харанхуй сэдэв) -->
+  <!-- Permission Overlay CSS (монгол) -->
   <style>
     .perm-overlay{
       position:fixed; inset:0; z-index:99999;
@@ -63,6 +63,19 @@
     .perm-help summary{ cursor:pointer; }
     .perm-help ol{ margin:10px 0 0 18px; }
     .hidden{ display:none !important; }
+
+    /* 🚫 Zappar-ийн built-in permission/compatibility UI-г нуух */
+    .zappar-compatibility-ui,
+    .zappar-permission-request,
+    .zappar-permission-request-ui,
+    .zappar-ui,
+    .zappar__permission-request,
+    .zappar__compatibility {
+      display:none !important;
+      visibility:hidden !important;
+      opacity:0 !important;
+      pointer-events:none !important;
+    }
   </style>
 </head>
 <body>
@@ -120,25 +133,10 @@
   </div>
 
   <!-- Hidden videos -->
-  <video
-    id="vidIntro"
-    playsinline webkit-playsinline
-    autoplay muted
-    preload="auto"
-    crossorigin="anonymous"
-    hidden
-  ></video>
+  <video id="vidIntro" playsinline webkit-playsinline autoplay muted preload="auto" crossorigin="anonymous" hidden></video>
+  <video id="vidExercise" playsinline webkit-playsinline autoplay muted loop preload="auto" crossorigin="anonymous" hidden></video>
 
-  <video
-    id="vidExercise"
-    playsinline webkit-playsinline
-    autoplay muted loop
-    preload="auto"
-    crossorigin="anonymous"
-    hidden
-  ></video>
-
-  <!-- ✅ Permission Overlay (монгол) -->
+  <!-- ✅ Монгол Permission Overlay -->
   <div id="permOverlay" class="perm-overlay" aria-modal="true" role="dialog">
     <div class="perm-card">
       <h2 class="perm-title">Бараг болчихлоо…</h2>
@@ -164,40 +162,32 @@
   <!-- Танай модулиуд -->
   <script type="module" src="./src/app.js"></script>
 
-  <!-- Overlay-г app.js-тэй холбох жижиг модуль -->
+  <!-- Overlay-г app.js-тэй холбох -->
   <script type="module">
-    // App-ийн tap-to-start handler аль хэдийн pointerdown дээр permission flow-г нээдэг.
-    // Тиймээс Grant дархад tapToStart дээрх gesture-ийг хиймэлээр өдөөе.
-    const overlay   = document.getElementById('permOverlay');
-    const grantBtn  = document.getElementById('btnGrant');
-    const laterBtn  = document.getElementById('btnLater');
-    const tapLayer  = document.getElementById('tapToStart');
+    const overlay  = document.getElementById('permOverlay');
+    const grantBtn = document.getElementById('btnGrant');
+    const laterBtn = document.getElementById('btnLater');
 
-    function triggerTapStart(){
-      try{
-        // tap layer харагдахгүй байсан ч listener нь байгаа — event л хэрэгтэй
-        const ev = new PointerEvent('pointerdown', { bubbles:true });
-        tapLayer?.dispatchEvent(ev);
-      }catch(_){}
+    async function runMglPermissionFlow() {
+      try {
+        // Танай app.js-аас байгаа ensurePermissionsGate ашиглана
+        await ensurePermissionsGate();
+        try { await ensureCameraOnce?.(); } catch(e){}
+        overlay?.classList.add('hidden');
+        if (!window.__introStarted) {
+          window.__introStarted = true;
+          await startIntroFlow?.(true);
+        }
+      } catch(e) {
+        alert(e?.message || "Зөвшөөрөл амжилтгүй.");
+      }
     }
 
-    grantBtn?.addEventListener('click', () => {
-      overlay?.classList.add('hidden');
-      // permission flow → app.js доторх tap handler руу шилжүүлнэ
-      triggerTapStart();
-    }, { passive:true });
-
+    grantBtn?.addEventListener('click', runMglPermissionFlow, { passive:true });
     laterBtn?.addEventListener('click', () => {
       overlay?.classList.add('hidden');
-      // хэрэглэгч дараа зөвшөөрөхөөр болвол үндсэн tap layer-ийг харагддаг болгоё
-      if (tapLayer) tapLayer.style.display = 'flex';
+      document.getElementById('tapToStart')?.style.setProperty('display','flex');
     }, { passive:true });
-
-    // Хэрэв танайд бүртгэлтэй төхөөрөмж бөгөөд app.js автоматаар эхлүүлдэг бол overlay-г хааж болно.
-    // window.__autoEntered = true гэх мэт флагийг app.js-ээс тавьж болно.
-    if (window.__autoEntered) {
-      overlay?.classList.add('hidden');
-    }
   </script>
 </body>
 </html>

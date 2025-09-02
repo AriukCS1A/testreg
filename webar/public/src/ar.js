@@ -8,7 +8,7 @@ export let scaleFactor = 1.35;
 const MIN_S = 0.6, MAX_S = 3;
 
 let onFrameCb = null;
-let cameraStarted = false; // ← камераа нэг л удаа асаана
+let cameraStarted = false; // камераа нэг л удаа асаана
 
 // --- iOS WebView / Code Scanner илрүүлэх ---
 function looksLikeIOSWebView() {
@@ -25,9 +25,10 @@ export async function initAR() {
     dbg("site must be HTTPS/secure context for camera");
   }
 
-  if (ZT.browserIncompatible()) {
-    ZT.browserIncompatibleUI();
-    throw new Error("browser incompatible");
+  // ✅ Zappar-ын дотоод UI-г бүү дууд: зөвхөн шалгаад өөрсдөө шийднэ
+  if (ZT.browserIncompatible?.()) {
+    // Хэрэв хүсвэл энд өөрийн монгол overlay/alert харуулж болно
+    throw new Error("Тухайн браузер AR-д тохирохгүй байна.");
   }
 
   // Renderer
@@ -116,7 +117,7 @@ export async function initAR() {
 
 export function onFrame(cb) { onFrameCb = cb; }
 
-/* ===== Камер зөв асаалт ===== */
+/* ===== Камер зөв асаалт (Зөвхөн системийн popup, Zappar UI ҮГҮЙ) ===== */
 export async function ensureCamera() {
   if (cameraStarted) return;
 
@@ -126,20 +127,28 @@ export async function ensureCamera() {
 
   dbg("asking camera permission…");
   try {
-    let granted = await ZT.permissionGranted();
-    if (!granted) {
-      try { granted = await ZT.permissionRequestUI(); } catch { granted = false; }
-    }
-    if (!granted) {
-      await ZT.permissionDeniedUI();
-      throw new Error("camera permission denied");
+    // 1) Зөвшөөрөл шалгах
+    let granted = true;
+    if (ZT.permissionGranted) {
+      granted = await ZT.permissionGranted();
     }
 
-    try {
-      await camera.start(true); // rear камер
-    } catch {
-      await camera.start();
+    // 2) Байхгүй бол системийн popup-оор асууна (UI биш!)
+    if (!granted && ZT.permissionRequest) {
+      try {
+        await ZT.permissionRequest(); // системийн native permission dialog
+        granted = await ZT.permissionGranted?.();
+      } catch (e) {
+        granted = false;
+      }
     }
+
+    if (!granted) {
+      throw new Error("Камерын зөвшөөрөл хэрэгтэй. Тохиргоогоо шалгаад дахин оролдоно уу.");
+    }
+
+    // 3) Камераа асаана (rear → fallback)
+    try { await camera.start(true); } catch { await camera.start(); }
 
     scene.background = camera.backgroundTexture;
     cameraStarted = true;
@@ -210,7 +219,7 @@ export function faceCameraNoRotate() {
   plane.rotation.z = VIDEO_ROT_Z;
 }
 
-// === Шэйдэр материалууд (tanai өмнөх шиг) ===
+// === Шэйдэр материалууд (таны одоогийн хэрэгжүүлэлт хэвээр үлдээгээрэй) ===
 export function makeSbsAlphaMaterial(tex) { /* ...таны одоогийн код хэвээр... */ }
 export function makeLumaKeyMaterial(tex, opts) { /* ... */ }
 export function makeChromaKeyMaterial(tex, opts) { /* ... */ }
