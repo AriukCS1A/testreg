@@ -222,11 +222,14 @@ async function requestCameraOnce() {
     });
 
   const attempts = [
-    [{ video: { facingMode: { ideal: "environment" } }, audio: false }, "env-ideal"],
-    [{ video: true, audio: false }, "video:true"],
-    [{ video: { facingMode: "user" }, audio: false }, "user"],
-    [{ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }, "1280x720"],
-  ];
+  // ✅ эхний оролдлого: rear-г яг таг (exact) шаардана
+  [{ video: { facingMode: { exact: "environment" } }, audio: false }, "env-exact"],
+  // дараагийн fallback-ууд
+  [{ video: { facingMode: { ideal: "environment" } }, audio: false }, "env-ideal"],
+  [{ video: true, audio: false }, "video:true"],
+  [{ video: { facingMode: "user" }, audio: false }, "user"],
+  [{ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }, "1280x720"],
+];
 
   let lastErr;
   try {

@@ -106,41 +106,33 @@ export function onFrame(cb) { onFrameCb = cb; }
 /* ===== Камер зөв асаалт (Зөвхөн системийн popup) ===== */
 export async function ensureCamera() {
   if (cameraStarted) return;
+  if (looksLikeIOSWebView()) throw new Error("iOS in-app WebView...");
 
-  if (looksLikeIOSWebView()) {
-    throw new Error("iOS in-app WebView/Code Scanner орчинд камер ажиллахгүй. Safari-д нээгээрэй.");
-  }
+  // ... permissionGranted / permissionRequest хэсэг таных хэвээр ...
 
-  dbg("asking camera permission…");
   try {
-    // Зарим хувилбарт permission API өөр байж болно → guard-тай
-    let granted = true;
-    if (ZT.permissionGranted) granted = await ZT.permissionGranted();
+    if (camera.stop) { try { camera.stop(); } catch {} }
 
-    if (!granted) {
-      if (ZT.permissionRequest) {
-        try { await ZT.permissionRequest(); } catch {}
-        granted = await ZT.permissionGranted?.();
-      } else if (ZT.permissionRequestUI) {
-        // Ховор тохиолдолд зөвхөн UI нь байдаг; fallback болгож дуудах (монгол overlay-оос аль хэдийн хэрэглэгч даралт хийсэн тул OK)
-        try { await ZT.permissionRequestUI(); } catch {}
-        granted = await ZT.permissionGranted?.();
-      }
-    }
+    // ✅ rear/environment-ийг хүчдэж асаана
+    await camera.start(false);   // эсвэл await camera.start();
 
-    if (!granted) throw new Error("Камерын зөвшөөрөл хэрэгтэй. Тохиргоогоо шалгаад дахин оролдоно уу.");
-
-    try { await camera.start(true); } catch { await camera.start(); } // rear → fallback
-    scene.background = camera.backgroundTexture;
-    cameraStarted = true;
-
+    // Зарим төхөөрөмж дээр анхны frame-ийн дараа front руу унах боломжтой → шалгаад дахин rear руу асаана
     await new Promise(r => requestAnimationFrame(r));
-    dbg("camera started (bg bound)");
-  } catch (e) {
-    dbg("camera start failed: " + (e?.message || e));
-    throw e;
+    if (camera.userFacing === true) {       // true бол front болжээ
+      await camera.start(false);            // дахин rear болгож асаана
+    }
+  } catch {
+    // fallback: ямар ч байсан rear-ийг оролдоно
+    await camera.start(false);
   }
+
+  scene.background = camera.backgroundTexture;
+  cameraStarted = true;
+  await new Promise(r => requestAnimationFrame(r));
+  dbg("camera started (rear)");
 }
+
+
 
 /* ===== ВИДЕО / ТЕКСТУР ===== */
 export function setSources(videoEl, webm = "", mp4 = "", forceMP4 = false) {
