@@ -216,8 +216,7 @@ async function requestCameraOnce() {
           if (done) { try { stream.getTracks().forEach((t) => t.stop()); } catch {} return; }
           clearTimeout(to); done = true; resolve(stream);
         },
-        (err) => { if (done) return; clearTimeout(to); done = true; reject(err);
-        }
+        (err) => { if (done) return; clearTimeout(to); done = true; reject(err); }
       );
     });
 
@@ -688,6 +687,7 @@ async function getRegistrationByDeviceKey() {
 
 /* ===== Локал төлөв ===== */
 let REG_INFO = null;
+let DEFERRED_GATE = false; // ✔️ интро дууссаны дараа gate харуулах эсэх
 
 /* ===== Phone gate ===== */
 let gateWired = false;
@@ -704,7 +704,7 @@ function showPhoneGate() {
     gateBusy = true;
     btnSendCode.disabled = true;
     try {
-      otpError.textContent = ""; // <— FIXED typo
+      otpError.textContent = "";
       const phone = normalizeMnPhone(otpPhoneEl.value.trim());
       if (!auth.currentUser) await signInAnonymously(auth).catch(() => {});
 
@@ -733,7 +733,13 @@ function showPhoneGate() {
 
         otpGate.hidden = true;
         otpPhoneEl.value = "";
-        if (!window.__introStarted) { window.__introStarted = true; await startIntroFlow(true); }
+        // ✔️ Интро яваад дууссан байвал меню нээ, эс тэгвээс интро эхлүүл
+        if (!window.__introStarted) {
+          window.__introStarted = true;
+          await startIntroFlow(true);
+        } else {
+          showMenuOverlay();
+        }
         return;
       }
 
@@ -771,7 +777,13 @@ function showPhoneGate() {
 
       otpGate.hidden = true;
       otpPhoneEl.value = "";
-      if (!window.__introStarted) { window.__introStarted = true; await startIntroFlow(true); }
+      // ✔️ Интро аль хэдийн эхэлсэн бол меню руу; эс тэгвээс интро эхлүүл
+      if (!window.__introStarted) {
+        window.__introStarted = true;
+        await startIntroFlow(true);
+      } else {
+        showMenuOverlay();
+      }
     } catch (e) {
       console.error(e);
       otpError.textContent = e?.message || "Бүртгэл амжилтгүй";
@@ -796,7 +808,9 @@ async function initGateOrAutoEnter() {
     otpGate.hidden = true;
     try { await updateRegHeartbeat(reg.phone, pos); } catch {}
   } else {
-    showPhoneGate();
+    // ✔️ Энд gate-ийг ХАРУУЛАХГҮЙ – интро дууссаны дараа харуулна
+    DEFERRED_GATE = true;
+    otpGate.hidden = true;
   }
 
   await logScan({
@@ -996,8 +1010,13 @@ async function startIntroFlow(fromTap = false) {
 
     vIntro.onended = () => {
       try { ["ibExercise", "ibGrowth", "ibKnowledge"].forEach((id) => document.getElementById(id)?.classList.add("mini")); } catch {}
-      showMenuOverlay();
-      dbg("intro ended → menu shown; sticky UI");
+      if (DEFERRED_GATE && !REG_INFO) {
+        showPhoneGate(); // ✔️ Интро дууссаны дараа л гарна
+        dbg("intro ended → phone gate shown");
+      } else {
+        showMenuOverlay();
+        dbg("intro ended → menu shown; sticky UI");
+      }
     };
   } finally { introLoading = false; }
 }
