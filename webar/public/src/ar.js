@@ -19,15 +19,38 @@ function looksLikeIOSWebView() {
 }
 
 export async function initAR() {
-  ({ THREE, ZapparThree: ZT } = await window.__depsReady);
-
-  if (!window.isSecureContext) dbg("site must be HTTPS/secure context for camera");
-  if (ZT.browserIncompatible?.()) {
-    // Zappar-ийн дотоод UI-г оруулахгүй – бид өөрсдийн overlay ашиглаж байгаа
-    throw new Error("Тухайн браузер AR-д тохирохгүй байна.");
+  // === 1) Dependencies-ийг аюулгүй авч, хамгаалалт тавина
+  let deps = null;
+  try {
+    if (!window.__depsReady) throw new Error("__depsReady байхгүй (скриптүүд бүрэн ачаалагдаагүй).");
+    deps = await window.__depsReady;
+  } catch (e) {
+    dbg("deps load failed:", e?.message || e);
+    throw new Error("AR-ийн хамаарал (THREE / Zappar) ачаалагдаагүй байна.");
   }
 
-  // Renderer
+  THREE = deps?.THREE || window.THREE;
+  ZT    = deps?.ZapparThree || deps?.ZT || window.ZapparThree;
+
+  if (!THREE) throw new Error("THREE.js ачаалагдаагүй байна.");
+  if (!ZT)    throw new Error("ZapparThree ачаалагдаагүй байна.");
+
+  // HTTPS шаардлага
+  if (!window.isSecureContext) dbg("site must be HTTPS/secure context for camera");
+
+  // === 2) Browser compatibility-г хамгаалалттай шалгана
+  try {
+    const incompatible = typeof ZT.browserIncompatible === "function" ? ZT.browserIncompatible() : false;
+    if (incompatible) {
+      // Zappar-ийн өөрийнх overlay-г ашиглахгүй тул эндээс тайлбартайгаар тасална
+      throw new Error("Тухайн браузер AR-д тохирохгүй байна.");
+    }
+  } catch (e) {
+    // Зарим билдүүдэд browserIncompatible байхгүй байж болно — ийм үед зүгээр алгасна
+    if (e?.message) dbg("browserIncompatible check skipped/failed:", e.message);
+  }
+
+  // === 3) Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(innerWidth, innerHeight);
@@ -44,7 +67,7 @@ export async function initAR() {
   // GL → Zappar
   ZT.glContextSet(renderer.getContext());
 
-  // Camera / Scene
+  // === 4) Camera / Scene
   camera = new ZT.Camera({ userFacing: false });
   scene = new THREE.Scene();
   scene.background = camera.backgroundTexture;
@@ -106,23 +129,22 @@ export function onFrame(cb) { onFrameCb = cb; }
 /* ===== Камер зөв асаалт (Зөвхөн системийн popup) ===== */
 export async function ensureCamera() {
   if (cameraStarted) return;
-  if (looksLikeIOSWebView()) throw new Error("iOS in-app WebView...");
+  if (looksLikeIOSWebView()) throw new Error("iOS in-app WebView… (Code Scanner/mini webview дотор camera хориглогддог)");
 
-  // ... permissionGranted / permissionRequest хэсэг таных хэвээр ...
-
+  // permissionGranted / permissionRequest хэсгийг та өөрийнхөөрөө үлдээсэн
   try {
     if (camera.stop) { try { camera.stop(); } catch {} }
 
     // ✅ rear/environment-ийг хүчдэж асаана
-    await camera.start(false);   // эсвэл await camera.start();
+    await camera.start(false);
 
-    // Зарим төхөөрөмж дээр анхны frame-ийн дараа front руу унах боломжтой → шалгаад дахин rear руу асаана
+    // Зарим төхөөрөмж front руу унадаг — дахин rear болгоно
     await new Promise(r => requestAnimationFrame(r));
-    if (camera.userFacing === true) {       // true бол front болжээ
-      await camera.start(false);            // дахин rear болгож асаана
+    if (camera.userFacing === true) {
+      await camera.start(false);
     }
   } catch {
-    // fallback: ямар ч байсан rear-ийг оролдоно
+    // Fallback — rear-ийг дахин оролд
     await camera.start(false);
   }
 
@@ -131,8 +153,6 @@ export async function ensureCamera() {
   await new Promise(r => requestAnimationFrame(r));
   dbg("camera started (rear)");
 }
-
-
 
 /* ===== ВИДЕО / ТЕКСТУР ===== */
 export function setSources(videoEl, webm = "", mp4 = "", forceMP4 = false) {
@@ -188,7 +208,6 @@ export function faceCameraNoRotate() {
 
 /* ================= Shader материалууд ================= */
 
-// SBS (Side-by-Side) зүүн талд RGB, баруун талд Alpha хадгалсан бичлэгийг тайлах материал
 export function makeSbsAlphaMaterial(tex) {
   tex.needsUpdate = true;
   const mat = new THREE.ShaderMaterial({
@@ -204,11 +223,10 @@ export function makeSbsAlphaMaterial(tex) {
       uniform sampler2D mapTex;
       varying vec2 vUv;
       void main(){
-        // left = RGB, right = A (same y, x/2)
         vec2 uvLeft  = vec2(vUv.x * 0.5, vUv.y);
         vec2 uvRight = vec2(0.5 + vUv.x * 0.5, vUv.y);
         vec4 rgb  = texture2D(mapTex, uvLeft);
-        float a   = texture2D(mapTex, uvRight).r; // alpha-г red сувагт хадгалсан гэж үзье
+        float a   = texture2D(mapTex, uvRight).r;
         gl_FragColor = vec4(rgb.rgb, a);
       }`,
     transparent: true,
@@ -217,7 +235,6 @@ export function makeSbsAlphaMaterial(tex) {
   return mat;
 }
 
-// Luma-key (цагаан дэвсгэрийг арилгах) – шаардлагатай үед
 export function makeLumaKeyMaterial(tex, opts = {}) {
   const { threshold = 0.9, smoothness = 0.1 } = opts;
   const mat = new THREE.ShaderMaterial({
@@ -247,7 +264,6 @@ export function makeLumaKeyMaterial(tex, opts = {}) {
   return mat;
 }
 
-// Chroma-key (ногоон дэлгэц)
 export function makeChromaKeyMaterial(tex, opts = {}) {
   const {
     keyColor = 0x00ff00,
@@ -282,7 +298,6 @@ export function makeChromaKeyMaterial(tex, opts = {}) {
       uniform float uSmoothness;
       uniform float uSpill;
 
-      // RGB → YCbCr
       vec3 rgb2ycbcr(vec3 c){
         float y  = dot(c, vec3(0.2989, 0.5866, 0.1145));
         float cb = (c.b - y) * 0.565;
@@ -301,7 +316,6 @@ export function makeChromaKeyMaterial(tex, opts = {}) {
         float edge1 = uSimilarity + uSmoothness;
         float alpha = 1.0 - smoothstep(edge0, edge1, dist);
 
-        // spill-ийг дарах
         float desat = clamp((dist - uSimilarity) / max(uSmoothness, 1e-5), 0.0, 1.0);
         vec3  rgb   = mix(col.rgb, vec3(ycc.x), desat * uSpill);
 

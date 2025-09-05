@@ -216,7 +216,8 @@ async function requestCameraOnce() {
           if (done) { try { stream.getTracks().forEach((t) => t.stop()); } catch {} return; }
           clearTimeout(to); done = true; resolve(stream);
         },
-        (err) => { if (done) return; clearTimeout(to); done = true; reject(err); }
+        (err) => { if (done) return; clearTimeout(to); done = true; reject(err);
+        }
       );
     });
 
@@ -703,7 +704,7 @@ function showPhoneGate() {
     gateBusy = true;
     btnSendCode.disabled = true;
     try {
-      otpError.textcontent = "";
+      otpError.textContent = ""; // <— FIXED typo
       const phone = normalizeMnPhone(otpPhoneEl.value.trim());
       if (!auth.currentUser) await signInAnonymously(auth).catch(() => {});
 
@@ -814,7 +815,14 @@ async function initGateOrAutoEnter() {
 }
 
 /* ===== main ===== */
-await initAR();
+// ★ initAR-ийг fire-and-forget болгож, унасан ч үлдсэн урсгал ажиллана
+let __arReady = false;
+initAR()
+  .then(() => { __arReady = true; dbg("initAR OK"); })
+  .catch((e) => {
+    console.error("initAR failed:", e);
+    dbg("initAR failed:", e?.message || e);
+  });
 
 // Boot дээр автоматаар камера асаахгүй
 await signInAnonymously(auth).catch(() => {});
