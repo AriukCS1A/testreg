@@ -166,7 +166,7 @@ async function thereIsCameraDevice() {
     const list = await navigator.mediaDevices.enumerateDevices();
     const hasVideo = list.some((d) => d.kind === "videoinput");
     if (!hasVideo) dbg("enumerateDevices: no videoinput found");
-    return hasVideo || isIOS; // iOS ихэнхдээ хоосон – true гэж үзье
+    return hasVideo || isIOS; // iOS заримдаа хоосон буудаг — true гэж үзье
   } catch { return true; }
 }
 
@@ -258,11 +258,11 @@ function requestGeoInGesture(opts = {}) {
   });
 }
 
-/** ✅ НЭГ gesture дээр CAMERA + GEO-г зэрэг эхлүүлээд дараа нь хамтад нь хүлээнэ */
+/** ✅ НЭГ gesture дээр CAMERA + GEO-г зэрэг асууж, дараа нь интро → gate */
 async function ensurePermissionsGate() {
   // Эхлүүлэх үед ямар ч await БҮҮ хий – popup-ууд тэгж байж гарна
-  const geoP = requestGeoInGesture();   // Location popup асаана
-  const camP = requestCameraOnce();     // Camera popup асаана
+  const geoP = requestGeoInGesture();
+  const camP = requestCameraOnce();
 
   try {
     const [_cam, pos] = await Promise.all([
@@ -271,7 +271,6 @@ async function ensurePermissionsGate() {
     ]);
     return pos;
   } catch (e) {
-    // Алдааг Монгол тайлбартай болгоод цааш шиднэ
     if (e?.code === 1) throw new Error("Байршлын зөвшөөрөл хэрэгтэй. Settings → Safari → Location → While Using the App болгож, дахин оролдоно уу.");
     if (e?.code === 2) throw new Error("GPS дохио сул байна. Илүү нээлттэй газар дахин оролдоно уу.");
     throw new Error(e?.message || "Зөвшөөрөл амжилтгүй.");
@@ -399,18 +398,6 @@ function pickSourcesFromDoc(doc) {
 
   dbg("pickSources:", out);
   return out;
-}
-
-/* ===== SBS эсэх ===== */
-function isSbsVideo(doc, vEl) {
-  const hint = String(doc?.alphaMode || doc?.format || "").toLowerCase();
-  if (hint.includes("sbs")) return true;
-  if (hint.includes("vp8")) return false;
-  const tagStr = (doc?.name || "") + " " + (doc?.url || "");
-  if (/(?:^|[_-])sbs(?:[_-]|\.|$)/i.test(tagStr)) return true;
-  const w = vEl?.videoWidth || 0, h = vEl?.videoHeight || 0;
-  if (w && h) { const r = w / h; if (r > 1.9 && r < 2.1) return true; }
-  return false;
 }
 
 /* ---- Cloudinary seek hack ---- */
@@ -687,7 +674,6 @@ async function getRegistrationByDeviceKey() {
 
 /* ===== Локал төлөв ===== */
 let REG_INFO = null;
-let DEFERRED_GATE = false; // ✔️ интро дууссаны дараа gate харуулах эсэх
 
 /* ===== Phone gate ===== */
 let gateWired = false;
@@ -708,7 +694,7 @@ function showPhoneGate() {
       const phone = normalizeMnPhone(otpPhoneEl.value.trim());
       if (!auth.currentUser) await signInAnonymously(auth).catch(() => {});
 
-      // 1) GPS
+      // Байршил авах (permission аль хэдийн байгаа)
       let pos;
       try {
         pos = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 });
@@ -719,7 +705,7 @@ function showPhoneGate() {
         return;
       }
 
-      // 2) Давхардсан эсэх
+      // Давхардлын шалгалт
       const ref = doc(db, "phone_regs", phone);
       const snap = await getDoc(ref).catch(() => null);
       if (snap && snap.exists()) {
@@ -733,17 +719,12 @@ function showPhoneGate() {
 
         otpGate.hidden = true;
         otpPhoneEl.value = "";
-        // ✔️ Интро яваад дууссан байвал меню нээ, эс тэгвээс интро эхлүүл
-        if (!window.__introStarted) {
-          window.__introStarted = true;
-          await startIntroFlow(true);
-        } else {
-          showMenuOverlay();
-        }
+        // Интро аль хэдийн дууссан тул одоо меню-г харуулна
+        showMenuOverlay();
         return;
       }
 
-      // 3) ШИНЭ бүртгэл
+      // ШИНЭ бүртгэл
       try {
         await setDoc(
           ref,
@@ -767,7 +748,7 @@ function showPhoneGate() {
         return;
       }
 
-      // 4) Лог
+      // Лог
       const chk = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
       dbg("Gate decision:", chk);
       await logScan({
@@ -777,13 +758,8 @@ function showPhoneGate() {
 
       otpGate.hidden = true;
       otpPhoneEl.value = "";
-      // ✔️ Интро аль хэдийн эхэлсэн бол меню руу; эс тэгвээс интро эхлүүл
-      if (!window.__introStarted) {
-        window.__introStarted = true;
-        await startIntroFlow(true);
-      } else {
-        showMenuOverlay();
-      }
+      // Бүртгэл амжилттай → меню рүү
+      showMenuOverlay();
     } catch (e) {
       console.error(e);
       otpError.textContent = e?.message || "Бүртгэл амжилтгүй";
@@ -795,41 +771,20 @@ function showPhoneGate() {
   }, { passive: true });
 }
 
-/* ===== Init: gate эсвэл шууд оруулах ===== */
+/* ===== Init: gate/intro boot ===== */
 async function initGateOrAutoEnter() {
-  // Boot дээр гео/камер асуухгүй
-  let pos = null;
+  // Boot дээр зөвшөөрөл асуухгүй (gesture хэрэгтэй), gate-ээ түр нуусан байна
+  otpGate.hidden = true;
 
+  // Бүртгэл байгаа эсэхийг тэмдэглээд л орхи (интро дуусахад ашиглана)
   const reg = await getRegistrationByDeviceKey();
-  let chk = null;
+  if (reg) REG_INFO = reg;
 
-  if (reg) {
-    REG_INFO = reg;
-    otpGate.hidden = true;
-    try { await updateRegHeartbeat(reg.phone, pos); } catch {}
-  } else {
-    // ✔️ Энд gate-ийг ХАРУУЛАХГҮЙ – интро дууссаны дараа харуулна
-    DEFERRED_GATE = true;
-    otpGate.hidden = true;
-  }
-
-  await logScan({
-    phone: reg?.phone || null,
-    loc: QR_LOC_ID,
-    pos,
-    ua: navigator.userAgent,
-    decision: chk ? {
-      ok: chk.ok,
-      dist: Math.round(chk.dist || 0),
-      radius: chk.radius,
-      buffer: Math.round(chk.buffer || 0),
-      reason: chk.reason,
-    } : null,
-  });
+  // Лог — зөвшөөрөлгүй тул gps=null
+  await logScan({ phone: reg?.phone || null, loc: QR_LOC_ID, pos: null, ua: navigator.userAgent, decision: null });
 }
 
 /* ===== main ===== */
-// ★ initAR-ийг fire-and-forget болгож, унасан ч үлдсэн урсгал ажиллана
 let __arReady = false;
 initAR()
   .then(() => { __arReady = true; dbg("initAR OK"); })
@@ -844,12 +799,13 @@ makeVideoDecodeFriendly(vIntro);
 makeVideoDecodeFriendly(vEx);
 await initGateOrAutoEnter();
 
-/* ===== iOS/Android: эхний tap дээр permission + camera + flow ===== */
+/* ===== Эхний tap: permission → camera → intro ===== */
 tapLay.addEventListener("pointerdown", async () => {
   tapLay.style.display = "none";
   try {
+    // 1) CAMERA + GEO-г нэг gesture дээр асууна
     try {
-      await ensurePermissionsGate(); // CAMERA + GEO-г нэг gesture-д
+      await ensurePermissionsGate();
       dbg("Permission gate OK");
     } catch(e){
       dbg("Permission gate failed:", e?.message||e);
@@ -858,8 +814,10 @@ tapLay.addEventListener("pointerdown", async () => {
       return;
     }
 
+    // 2) Камераа асаана
     try { await ensureCameraOnce(); } catch (e) { dbg("camera on tap:", e?.message || e); }
 
+    // 3) Интро шууд эхлүүлнэ
     if (!window.__introStarted) {
       window.__introStarted = true;
       await startIntroFlow(true);
@@ -934,19 +892,15 @@ async function startIntroFlow(fromTap = false) {
 
     const introDoc = await fetchLatestIntro();
     if (!introDoc) {
-      dbg("No global intro video → try starting exercise directly");
-      if (QR_LOC_ID) {
-        const posNow = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 }).catch(() => null);
-        const chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
-        if (chk.ok) { await startExerciseDirect(); }
-        else { dbg(`Exercise locked: not within location. dist=${Math.round(chk?.dist || -1)} > allowed=${chk?.radius}+${Math.round(chk?.buffer || 0)}`); }
-      }
+      dbg("No global intro video");
+      // Интро байхгүй бол шууд бүртгэлийн үе шат руу
+      await afterIntroGate();
       return;
     }
     const introSrc = pickSourcesFromDoc(introDoc);
     dbg("Intro sources:", introSrc);
 
-    // Exercise prefetch (GPS≈QR)
+    // Exercise-ийг урьдчилан бэлдэх нь хэвээр
     let exDoc = null, exSrc = null, posNow = null, chk = null;
     if (QR_LOC_ID) {
       posNow = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 }).catch(() => null);
@@ -956,15 +910,9 @@ async function startIntroFlow(fromTap = false) {
       if (chk.ok) {
         exDoc = await fetchLatestExerciseFor(QR_LOC_ID);
         if (exDoc) { exSrc = pickSourcesFromDoc(exDoc); dbg("Exercise sources:", exSrc); }
-      } else {
-        const name = chk?.loc?.name || QR_LOC_ID;
-        dbg(`Exercise locked: need near "${name}". dist=${Math.round(chk?.dist || -1)} > allowed=${chk?.radius}+${Math.round(chk?.buffer || 0)}`);
       }
-    } else {
-      dbg("QR loc not provided → exercise prefetch disabled");
     }
 
-    // Load intro (+prefetch exercise)
     const introKind = await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4, introSrc.mp4_sbs);
     if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, exSrc.mp4_sbs);
 
@@ -980,9 +928,9 @@ async function startIntroFlow(fromTap = false) {
     const looksOpaqueIntro = await videoLooksOpaque(vIntro);
     if (looksOpaqueIntro && useIntroKind === "alpha") useIntroKind = "flat";
 
-    // === Material select → CHROMA KEY default ===
+    // Материал
     if (useIntroKind === "alpha") {
-      planeUseMap(texIntro); // VP8/HEVC alpha
+      planeUseMap(texIntro);
     } else {
       planeUseChroma(texIntro, { keyColor: 0x00ff00, similarity: 0.32, smoothness: 0.08, spill: 0.18 });
     }
@@ -1008,17 +956,25 @@ async function startIntroFlow(fromTap = false) {
       });
     } catch (e) { dbg("GPS watch failed:", e?.message || e); }
 
-    vIntro.onended = () => {
+    vIntro.onended = async () => {
       try { ["ibExercise", "ibGrowth", "ibKnowledge"].forEach((id) => document.getElementById(id)?.classList.add("mini")); } catch {}
-      if (DEFERRED_GATE && !REG_INFO) {
-        showPhoneGate(); // ✔️ Интро дууссаны дараа л гарна
-        dbg("intro ended → phone gate shown");
-      } else {
-        showMenuOverlay();
-        dbg("intro ended → menu shown; sticky UI");
-      }
+      await afterIntroGate();
     };
   } finally { introLoading = false; }
+}
+
+/** Интро дууссаны дараах логик: бүртгэлтэй бол меню, үгүй бол gate */
+async function afterIntroGate() {
+  stopGeoWatch();
+  const reg = REG_INFO || await getRegistrationByDeviceKey();
+  if (reg) {
+    REG_INFO = reg;
+    showMenuOverlay();
+    dbg("intro ended → already registered → menu shown");
+  } else {
+    showPhoneGate();
+    dbg("intro ended → show phone gate (registration begins)");
+  }
 }
 
 async function startExerciseDirect() {
@@ -1061,7 +1017,6 @@ async function startExerciseDirect() {
     const looksOpaqueEx = await videoLooksOpaque(vEx);
     if (looksOpaqueEx && useExKind === "alpha") useExKind = "flat";
 
-    // === Material select → CHROMA KEY default ===
     if (useExKind === "alpha") {
       planeUseMap(texEx);
     } else {
