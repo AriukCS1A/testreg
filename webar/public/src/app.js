@@ -298,6 +298,23 @@ async function requestGeoInGesture(opts = {}) {
   });
 }
 
+/** ✅ НЭГ gesture дээр CAMERA + GEO-г зэрэг асууж, дараа нь интро → gate */
+async function ensurePermissionsGate() {
+  const geoP = requestGeoInGesture();
+  const camP = requestCameraOnce();
+  try {
+    const [_cam, pos] = await Promise.all([
+      camP.catch(e => { throw e; }),
+      geoP.catch(e => { throw e; }),
+    ]);
+    return pos;
+  } catch (e) {
+    if (e?.code === 1) throw new Error("Байршлын зөвшөөрөл хэрэгтэй. Settings → Safari → Location → While Using the App болгож, дахин оролдоно уу.");
+    if (e?.code === 2) throw new Error("GPS дохио сул байна. Илүү нээлттэй газар дахин оролдоно уу.");
+    throw new Error(e?.message || "Зөвшөөрөл амжилтгүй.");
+  }
+}
+
 /* ===== helpers ===== */
 async function safePlay(v) {
   if (!v) return;
@@ -327,22 +344,13 @@ const __arInitP = initAR()
 /* ===== ensureCamera once/cache ===== */
 let __camPromise = null;
 async function ensureCameraOnce() {
+  // ✅ AR бүрэн инициализ дуустал хүлээж байж камер луу орно (iOS race fix)
   try { if (!__arReady) await __arInitP; } catch {}
   if (__camPromise) return __camPromise;
   if (typeof ensureCamera !== "function") {
     throw new Error("AR engine is not ready (ensureCamera missing)");
-  }
-  __camPromise = ensureCamera()
-    .then((cam) => {
-      if (!cam) { throw new Error("ensureCamera returned null/undefined"); }
-      if (typeof cam.start === "function") {
-        try { cam.start(); } catch (e) { dbg("camera.start failed:", e?.message || e); }
-      } else {
-        dbg("ensureCamera: no camera.start method found");
-      }
-      return cam;
-    })
-    .catch((e) => { __camPromise = null; dbg("ensureCameraOnce failed:", e?.message || e); throw e; });
+    }
+  __camPromise = ensureCamera().catch((e) => { __camPromise = null; throw e; });
   return __camPromise;
 }
 
@@ -449,18 +457,17 @@ function pickSourcesFromDoc(doc) {
 function isCloudinary(u) { try { return /res\.cloudinary\.com/.test(new URL(u).host); } catch { return false; } }
 function withSeekHack(u) { if (!u) return u; return isCloudinary(u) ? u + (u.includes("#") ? "" : "#t=0.001") : u; }
 
-/* ===== Candidates for device ===== */
-// NOTE: iOS дээр canPlayType('video/mp4') зарим WebView-д хоосон буцдаг тул
-// MP4/MOV байвал шууд оролцуулна.
+/* Candidates for device */
 function pickBestForDevice({ webm, mp4_sbs, mp4 }) {
   const v = document.createElement("video");
   const can = (t) => !!v.canPlayType && v.canPlayType(t).replace(/no/, "");
+
   const isiOSDevice = isIOS === true;
 
   if (isiOSDevice) {
     const list = [];
-    if (mp4_sbs) list.push({ url: mp4_sbs, type: "video/mp4", kind: "sbs" });
-    if (mp4)     list.push({ url: mp4,     type: "video/mp4", kind: "flat" });
+    if (mp4_sbs && can("video/mp4")) list.push({ url: mp4_sbs, type: "video/mp4", kind: "sbs" });
+    if (mp4 && can("video/mp4")) list.push({ url: mp4, type: "video/mp4", kind: "flat" });
     return list;
   }
 
@@ -468,7 +475,7 @@ function pickBestForDevice({ webm, mp4_sbs, mp4 }) {
   if (webm && (can('video/webm; codecs="vp8,opus"') || can("video/webm")))
     list.push({ url: webm, type: "video/webm", kind: "alpha" });
   if (mp4_sbs && can("video/mp4")) list.push({ url: mp4_sbs, type: "video/mp4", kind: "sbs" });
-  if (mp4 && can("video/mp4"))     list.push({ url: mp4,     type: "video/mp4", kind: "flat" });
+  if (mp4 && can("video/mp4")) list.push({ url: mp4, type: "video/mp4", kind: "flat" });
   return list;
 }
 
@@ -494,20 +501,11 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs) {
 
   const attempts = [];
   for (const c of base) {
-    const isMov = /\.mov($|\?)/i.test(c.url);
-    const plain      = { ...c, label: c.kind + "|no-seek|sniff", url: c.url, type: null };
+    const plain = { ...c, label: c.kind + "|no-seek|sniff", url: c.url, type: null };
     const plainTyped = { ...c, label: c.kind + "|no-seek|typed", url: c.url, type: c.type };
-    const seek       = { ...c, label: c.kind + "|seek|sniff",    url: withSeekHack(c.url), type: null };
-    const seekTyped  = { ...c, label: c.kind + "|seek|typed",    url: withSeekHack(c.url), type: c.type };
+    const seek = { ...c, label: c.kind + "|seek|sniff", url: withSeekHack(c.url), type: null };
+    const seekTyped = { ...c, label: c.kind + "|seek|typed", url: withSeekHack(c.url), type: c.type };
     attempts.push(plain, plainTyped, seek, seekTyped);
-
-    // MOV-г quicktime MIME-ээр бас туршина
-    if (isMov) {
-      attempts.push(
-        { ...c, label: c.kind + "|qt|typed", url: c.url, type: "video/quicktime" },
-        { ...c, label: c.kind + "|qt|seek",  url: withSeekHack(c.url), type: "video/quicktime" },
-      );
-    }
   }
 
   function tryOnce({ url, type, label }) {
@@ -573,7 +571,6 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs) {
       if (v.readyState >= 3) finishOk();
     });
   }
-
   let lastErr;
   for (const a of attempts) {
     try {
@@ -853,15 +850,7 @@ tapLay.addEventListener("pointerdown", async () => {
   try {
     // 1) CAMERA + GEO-г нэг gesture дээр асууна
     try {
-      await (async function ensurePermissionsGate(){
-        const geoP = requestGeoInGesture();
-        const camP = requestCameraOnce();
-        const [_cam, pos] = await Promise.all([
-          camP.catch(e => { throw e; }),
-          geoP.catch(e => { throw e; }),
-        ]);
-        return pos;
-      })();
+      await ensurePermissionsGate();
       dbg("Permission gate OK");
     } catch(e){
       dbg("Permission gate failed:", e?.message||e);
@@ -984,12 +973,11 @@ async function startIntroFlow(fromTap = false) {
     const looksOpaqueIntro = await videoLooksOpaque(vIntro);
     if (looksOpaqueIntro && useIntroKind === "alpha") useIntroKind = "flat";
 
-    // Материал — хар фон key
+    // Материал
     if (useIntroKind === "alpha") {
       planeUseMap(texIntro);
     } else {
-      // Хар фонтой видео бол 0x000000 түлхүүрээр кодоор арилгана
-      planeUseChroma(texIntro, { keyColor: 0x000000, similarity: 0.08, smoothness: 0.06, spill: 0.12 });
+      planeUseChroma(texIntro, { keyColor: 0x00ff00, similarity: 0.32, smoothness: 0.08, spill: 0.18 });
     }
 
     fitPlaneToVideo(vIntro);
@@ -1077,8 +1065,7 @@ async function startExerciseDirect() {
     if (useExKind === "alpha") {
       planeUseMap(texEx);
     } else {
-      // Хар фон key-ийг exercise талд ч мөн адил
-      planeUseChroma(texEx, { keyColor: 0x000000, similarity: 0.08, smoothness: 0.06, spill: 0.12 });
+      planeUseChroma(texEx, { keyColor: 0x00ff00, similarity: 0.32, smoothness: 0.08, spill: 0.18 });
     }
 
     fitPlaneToVideo(vEx);
@@ -1140,7 +1127,7 @@ btnUnmute.addEventListener("click", async () => {
 });
 
 /* ===== Overlay-аас дуудах боломжтой болгож window дээр экспортлоё ===== */
-window.ensurePermissionsGate = requestGeoInGesture; // (gesture-д geolocation дуудах helper-ийг ил гаргахгүй; зөвхөн gate-д ашигласан)
+window.ensurePermissionsGate = ensurePermissionsGate;
 window.ensureCameraOnce = ensureCameraOnce;
 window.startIntroFlow = startIntroFlow;
 window.__appReady = true;
