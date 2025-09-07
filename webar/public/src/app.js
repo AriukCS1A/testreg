@@ -331,10 +331,25 @@ function makeVideoDecodeFriendly(v) {
   } catch {}
 }
 
+/* ===== AR init (single-flight) ===== */
+let __arReady = false;
+const __arInitP = initAR()
+  .then(() => { __arReady = true; dbg("initAR OK"); })
+  .catch((e) => {
+    console.error("initAR failed:", e);
+    dbg("initAR failed:", e?.message || e);
+    throw e;
+  });
+
 /* ===== ensureCamera once/cache ===== */
 let __camPromise = null;
 async function ensureCameraOnce() {
+  // ✅ AR бүрэн инициализ дуустал хүлээж байж камер луу орно (iOS race fix)
+  try { if (!__arReady) await __arInitP; } catch {}
   if (__camPromise) return __camPromise;
+  if (typeof ensureCamera !== "function") {
+    throw new Error("AR engine is not ready (ensureCamera missing)");
+    }
   __camPromise = ensureCamera().catch((e) => { __camPromise = null; throw e; });
   return __camPromise;
 }
@@ -823,14 +838,6 @@ async function initGateOrAutoEnter() {
 }
 
 /* ===== main ===== */
-let __arReady = false;
-initAR()
-  .then(() => { __arReady = true; dbg("initAR OK"); })
-  .catch((e) => {
-    console.error("initAR failed:", e);
-    dbg("initAR failed:", e?.message || e);
-  });
-
 // Boot дээр автоматаар камера асаахгүй
 await signInAnonymously(auth).catch(() => {});
 makeVideoDecodeFriendly(vIntro);
@@ -852,7 +859,7 @@ tapLay.addEventListener("pointerdown", async () => {
       return;
     }
 
-    // 2) Камераа асаана
+    // 2) Камераа асаана — AR бүрэн init болсны дараа
     try { await ensureCameraOnce(); } catch (e) { dbg("camera on tap:", e?.message || e); }
 
     // 3) Интро шууд эхлүүлнэ
