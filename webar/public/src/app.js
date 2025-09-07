@@ -349,7 +349,7 @@ async function ensureCameraOnce() {
   if (__camPromise) return __camPromise;
   if (typeof ensureCamera !== "function") {
     throw new Error("AR engine is not ready (ensureCamera missing)");
-    }
+  }
   __camPromise = ensureCamera().catch((e) => { __camPromise = null; throw e; });
   return __camPromise;
 }
@@ -457,25 +457,22 @@ function pickSourcesFromDoc(doc) {
 function isCloudinary(u) { try { return /res\.cloudinary\.com/.test(new URL(u).host); } catch { return false; } }
 function withSeekHack(u) { if (!u) return u; return isCloudinary(u) ? u + (u.includes("#") ? "" : "#t=0.001") : u; }
 
-/* Candidates for device */
+/* Candidates for device (UPDATED) */
 function pickBestForDevice({ webm, mp4_sbs, mp4 }) {
-  const v = document.createElement("video");
-  const can = (t) => !!v.canPlayType && v.canPlayType(t).replace(/no/, "");
-
   const isiOSDevice = isIOS === true;
+  const list = [];
+  const push = (url, kind, type = null) => { if (url) list.push({ url, type, kind }); };
 
   if (isiOSDevice) {
-    const list = [];
-    if (mp4_sbs && can("video/mp4")) list.push({ url: mp4_sbs, type: "video/mp4", kind: "sbs" });
-    if (mp4 && can("video/mp4")) list.push({ url: mp4, type: "video/mp4", kind: "flat" });
-    return list;
+    // iOS: WEBM битгий оролд — шууд MP4-уудыг туршиж үзнэ
+    push(mp4_sbs, "sbs", "video/mp4");
+    push(mp4,     "flat", "video/mp4");
+  } else {
+    // Android/Desktop: эхлээд WEBM (alpha), дараа нь MP4(SBS→flat)
+    push(webm,    "alpha", 'video/webm; codecs="vp8,opus"');
+    push(mp4_sbs, "sbs",   "video/mp4");
+    push(mp4,     "flat",  "video/mp4");
   }
-
-  const list = [];
-  if (webm && (can('video/webm; codecs="vp8,opus"') || can("video/webm")))
-    list.push({ url: webm, type: "video/webm", kind: "alpha" });
-  if (mp4_sbs && can("video/mp4")) list.push({ url: mp4_sbs, type: "video/mp4", kind: "sbs" });
-  if (mp4 && can("video/mp4")) list.push({ url: mp4, type: "video/mp4", kind: "flat" });
   return list;
 }
 
@@ -501,10 +498,10 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs) {
 
   const attempts = [];
   for (const c of base) {
-    const plain = { ...c, label: c.kind + "|no-seek|sniff", url: c.url, type: null };
-    const plainTyped = { ...c, label: c.kind + "|no-seek|typed", url: c.url, type: c.type };
-    const seek = { ...c, label: c.kind + "|seek|sniff", url: withSeekHack(c.url), type: null };
-    const seekTyped = { ...c, label: c.kind + "|seek|typed", url: withSeekHack(c.url), type: c.type };
+    const plain     = { ...c, label: c.kind + "|no-seek|sniff", url: c.url, type: null };
+    const plainTyped= { ...c, label: c.kind + "|no-seek|typed", url: c.url, type: c.type };
+    const seek      = { ...c, label: c.kind + "|seek|sniff",    url: withSeekHack(c.url), type: null };
+    const seekTyped = { ...c, label: c.kind + "|seek|typed",    url: withSeekHack(c.url), type: c.type };
     attempts.push(plain, plainTyped, seek, seekTyped);
   }
 
@@ -973,9 +970,11 @@ async function startIntroFlow(fromTap = false) {
     const looksOpaqueIntro = await videoLooksOpaque(vIntro);
     if (looksOpaqueIntro && useIntroKind === "alpha") useIntroKind = "flat";
 
-    // Материал
+    // Материал (SBS салаа нэмсэн)
     if (useIntroKind === "alpha") {
       planeUseMap(texIntro);
+    } else if (useIntroKind === "sbs") {
+      planeUseShader(texIntro);
     } else {
       planeUseChroma(texIntro, { keyColor: 0x00ff00, similarity: 0.32, smoothness: 0.08, spill: 0.18 });
     }
@@ -1062,8 +1061,11 @@ async function startExerciseDirect() {
     const looksOpaqueEx = await videoLooksOpaque(vEx);
     if (looksOpaqueEx && useExKind === "alpha") useExKind = "flat";
 
+    // Материал (SBS салаа нэмсэн)
     if (useExKind === "alpha") {
       planeUseMap(texEx);
+    } else if (useExKind === "sbs") {
+      planeUseShader(texEx);
     } else {
       planeUseChroma(texEx, { keyColor: 0x00ff00, similarity: 0.32, smoothness: 0.08, spill: 0.18 });
     }
