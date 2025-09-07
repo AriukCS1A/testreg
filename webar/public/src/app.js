@@ -177,6 +177,31 @@ async function logPermissionStates() {
   }
 }
 
+// === iOS warm-up helpers ===
+function attachToHiddenVideoOnce(stream) {
+  return new Promise((resolve) => {
+    try {
+      const v = document.createElement("video");
+      v.muted = true;
+      v.setAttribute("muted", "");
+      v.playsInline = true;
+      v.preload = "auto";
+      makeVideoDecodeFriendly(v);
+      v.srcObject = stream;
+      const done = () => {
+        try { v.pause(); } catch {}
+        try { v.srcObject = null; } catch {}
+        resolve();
+      };
+      const onLoaded = () => { requestAnimationFrame(done); };
+      v.addEventListener("loadedmetadata", onLoaded, { once: true });
+      v.addEventListener("error", done, { once: true });
+      v.play().catch(() => done());
+    } catch { resolve(); }
+  });
+}
+function stopAll(stream) { try { stream?.getTracks?.().forEach(t => t.stop()); } catch {} }
+
 async function requestCameraOnce() {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error("Камер ашиглах боломжгүй төхөөрөмж.");
   await logPermissionStates();
@@ -193,9 +218,7 @@ async function requestCameraOnce() {
   if (CAM_PROMPTED) { dbg("camera already prompted – skip duplicate getUserMedia"); return true; }
   if (CAM_REQ_IN_FLIGHT) {
     dbg("camera request in-flight – wait");
-    await new Promise((r) => {
-      const id = setInterval(() => { if (!CAM_REQ_IN_FLIGHT) { clearInterval(id); r(); } }, 50);
-    });
+    await new Promise((r) => { const id = setInterval(() => { if (!CAM_REQ_IN_FLIGHT) { clearInterval(id); r(); } }, 50); });
     return CAM_PROMPTED;
   }
 
@@ -205,16 +228,18 @@ async function requestCameraOnce() {
 
   CAM_REQ_IN_FLIGHT = true;
 
-  const tryWithTimeout = (constraints, label, ms = 12000) =>
+  const tryWithTimeout = (constraints, label, ms = 16000) =>
     new Promise((resolve, reject) => {
       let done = false;
       const to = setTimeout(() => { if (!done) { done = true; reject(new Error(`Camera request timed out: ${label}`)); } }, ms);
 
       dbg("getUserMedia →", label);
       navigator.mediaDevices.getUserMedia(constraints).then(
-        (stream) => {
-          if (done) { try { stream.getTracks().forEach((t) => t.stop()); } catch {} return; }
-          clearTimeout(to); done = true; resolve(stream);
+        async (stream) => {
+          if (done) { stopAll(stream); return; }
+          clearTimeout(to); done = true;
+          try { await attachToHiddenVideoOnce(stream); } catch {} finally { stopAll(stream); }
+          resolve(stream);
         },
         (err) => { if (done) return; clearTimeout(to); done = true; reject(err); }
       );
@@ -232,9 +257,8 @@ async function requestCameraOnce() {
   try {
     for (const [c, label] of attempts) {
       try {
-        const s = await tryWithTimeout(c, label);
+        await tryWithTimeout(c, label);
         CAM_PROMPTED = true;
-        try { s.getTracks().forEach((t) => t.stop()); } catch {}
         return true;
       } catch (e) { lastErr = e; dbg("camera attempt failed:", label, e?.name || e?.message || e); }
     }
@@ -245,25 +269,39 @@ async function requestCameraOnce() {
   } finally { CAM_REQ_IN_FLIGHT = false; }
 }
 
-/* --- GEO-г gesture дотор эхлүүлэх тусдаа wrapper (await ХИЙХГҮЙ эхлүүлдэг) --- */
-function requestGeoInGesture(opts = {}) {
+async function requestGeoInGesture(opts = {}) {
   return new Promise((resolve, reject) => {
     try {
-      navigator.geolocation.getCurrentPosition(
-        resolve,
-        reject,
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0, ...opts }
+      const options = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0, ...opts };
+      let cleaned = false;
+      let watchId = null;
+      const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        try { if (watchId != null) navigator.geolocation.clearWatch(watchId); } catch {}
+      };
+      // 1) Түр watch — эхний callback дээр шууд дуусгана
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => { cleanup(); resolve(pos); },
+        (err) => { cleanup(); reject(err); },
+        options
       );
+      // 2) Давхар safeguard: getCurrentPosition
+      navigator.geolocation.getCurrentPosition(
+        (pos) => { cleanup(); resolve(pos); },
+        (err) => { cleanup(); reject(err); },
+        options
+      );
+      // 3) Extra timeout
+      setTimeout(() => { cleanup(); reject(new Error("Гео: хугацаа хэтэрлээ")); }, options.timeout + 2000);
     } catch (e) { reject(e); }
   });
 }
 
 /** ✅ НЭГ gesture дээр CAMERA + GEO-г зэрэг асууж, дараа нь интро → gate */
 async function ensurePermissionsGate() {
-  // Эхлүүлэх үед ямар ч await БҮҮ хий – popup-ууд тэгж байж гарна
   const geoP = requestGeoInGesture();
   const camP = requestCameraOnce();
-
   try {
     const [_cam, pos] = await Promise.all([
       camP.catch(e => { throw e; }),
