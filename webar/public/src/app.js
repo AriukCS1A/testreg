@@ -59,6 +59,7 @@ import {
   where,
   limit,
   arrayUnion,
+  orderBy, // <-- НЭМСЭН: uploadedAt-ээр эрэмбэлэхэд
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ===== Geolocation helpers ===== */
@@ -147,15 +148,13 @@ async function backToMenuFromExercise() {
     try {
       vEx?.pause?.();
     } catch {}
-    hidePlane(); // дүрсийг түр нууж цагаан анивчлалас сэргийлнэ
+    hidePlane();
     currentVideo = null;
-    showMenuOverlay(); // менюг буцааж харуулна (ui.js дотор Back товчийг автоматаар нуух тохируулгатай)
+    showMenuOverlay();
   } finally {
-    hideBackButton(); // давхар баталгаажуулж нууж байна
+    hideBackButton();
   }
 }
-
-// Нэг л удаа click handler холбох
 onBackButton(backToMenuFromExercise);
 
 /* ===== Firebase ===== */
@@ -429,7 +428,6 @@ async function requestGeoInGesture(opts = {}) {
           if (watchId != null) navigator.geolocation.clearWatch(watchId);
         } catch {}
       };
-      // 1) Түр watch — эхний callback дээр шууд дуусгана
       watchId = navigator.geolocation.watchPosition(
         (pos) => {
           cleanup();
@@ -441,7 +439,6 @@ async function requestGeoInGesture(opts = {}) {
         },
         options
       );
-      // 2) Давхар safeguard: getCurrentPosition
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           cleanup();
@@ -453,7 +450,6 @@ async function requestGeoInGesture(opts = {}) {
         },
         options
       );
-      // 3) Extra timeout
       setTimeout(() => {
         cleanup();
         reject(new Error("Гео: хугацаа хэтэрлээ"));
@@ -532,7 +528,6 @@ const __arInitP = initAR()
 /* ===== ensureCamera once/cache ===== */
 let __camPromise = null;
 async function ensureCameraOnce() {
-  // ✅ AR бүрэн инициализ дуустал хүлээж байж камер луу орно (iOS race fix)
   try {
     if (!__arReady) await __arInitP;
   } catch {}
@@ -657,8 +652,6 @@ function cleanUrl(u = "") {
   );
 }
 
-// --- replace your extFromUrl + pickSourcesFromDoc with this ---
-
 function extFromUrl(u = "") {
   try {
     const url = new URL(u);
@@ -666,7 +659,6 @@ function extFromUrl(u = "") {
       url.pathname.match(/\.([a-z0-9]+)$/i)?.[1] || ""
     ).toLowerCase();
     const q = (url.search + url.hash).toLowerCase();
-    // Хэрвээ query/hash-д шууд хэлбэр нь туссан бол тэрийг давуу болгоё
     if (/webm/.test(q)) return "webm";
     if (
       /(^|[_-])sbs([_.-]|$)/.test(url.pathname) ||
@@ -693,7 +685,6 @@ function normFormat(x = "") {
 function pickSourcesFromDoc(doc) {
   const out = { webm: null, mp4_sbs: null, mp4: null };
 
-  // 1) Хэрэв тусдаа талбарууд байвал шууд уншина
   const directWebm = cleanUrl(doc?.webm || doc?.alphaUrl);
   const directSbs = cleanUrl(doc?.mp4Sbs || doc?.sbs || doc?.stereo);
   const directMp4 = cleanUrl(doc?.mp4 || doc?.flat || doc?.urlFlat);
@@ -702,7 +693,6 @@ function pickSourcesFromDoc(doc) {
   if (directSbs) out.mp4_sbs = directSbs;
   if (directMp4) out.mp4 = directMp4;
 
-  // 2) Ерөнхий url талбараас төрөл тодорхойлох
   const mainUrl = cleanUrl(doc?.url);
   if (mainUrl) {
     const ext = extFromUrl(mainUrl);
@@ -713,7 +703,6 @@ function pickSourcesFromDoc(doc) {
       out.mp4 = mainUrl;
   }
 
-  // 3) format талбарыг дахиад шалгая
   if (!out.webm && !out.mp4_sbs && !out.mp4) {
     const fmt = normFormat(doc?.format || "");
     if (fmt === "webm") out.webm = mainUrl;
@@ -747,11 +736,9 @@ function pickBestForDevice({ webm, mp4_sbs, mp4 }) {
   };
 
   if (isiOSDevice) {
-    // iOS: WEBM битгий оролд — шууд MP4-уудыг туршиж үзнэ
     push(mp4_sbs, "sbs", "video/mp4");
     push(mp4, "flat", "video/mp4");
   } else {
-    // Android/Desktop: эхлээд WEBM (alpha), дараа нь MP4(SBS→flat)
     push(webm, "alpha", 'video/webm; codecs="vp8,opus"');
     push(mp4_sbs, "sbs", "video/mp4");
     push(mp4, "flat", "video/mp4");
@@ -776,37 +763,17 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs) {
 
   makeVideoDecodeFriendly(v);
 
-  if (isIOS === true) webm = null; // iOS дээр webm унтраах
+  if (isIOS === true) webm = null;
 
   const base = pickBestForDevice({ webm, mp4_sbs, mp4 });
   if (!base.length) throw new Error("No playable sources for this device");
 
   const attempts = [];
   for (const c of base) {
-    const plain = {
-      ...c,
-      label: c.kind + "|no-seek|sniff",
-      url: c.url,
-      type: null,
-    };
-    const plainTyped = {
-      ...c,
-      label: c.kind + "|no-seek|typed",
-      url: c.url,
-      type: c.type,
-    };
-    const seek = {
-      ...c,
-      label: c.kind + "|seek|sniff",
-      url: withSeekHack(c.url),
-      type: null,
-    };
-    const seekTyped = {
-      ...c,
-      label: c.kind + "|seek|typed",
-      url: withSeekHack(c.url),
-      type: c.type,
-    };
+    const plain = { ...c, label: c.kind + "|no-seek|sniff", url: c.url, type: null };
+    const plainTyped = { ...c, label: c.kind + "|no-seek|typed", url: c.url, type: c.type };
+    const seek = { ...c, label: c.kind + "|seek|sniff", url: withSeekHack(c.url), type: null };
+    const seekTyped = { ...c, label: c.kind + "|seek|typed", url: withSeekHack(c.url), type: c.type };
     attempts.push(plain, plainTyped, seek, seekTyped);
   }
 
@@ -965,27 +932,32 @@ async function fetchLatestIntro() {
   return null;
 }
 
-async function fetchLatestExerciseFor(locationId) {
-  if (!locationId) return null;
+/* === ШИНЭ: тухайн локацид формат тус бүрийн хамгийн сүүлийг авах === */
+async function latestExerciseByFormatAtLoc(fmt, locId) {
   const q = fsQuery(
     collection(db, "videos"),
     where("active", "==", true),
     where("isGlobal", "==", false),
-    where("locationIds", "array-contains", locationId),
+    where("locationIds", "array-contains", locId),
+    where("format", "==", fmt),
+    orderBy("uploadedAt", "desc"),
     limit(1)
   );
-  const snap = await getDocs(q);
-  if (snap.empty) return null;
-  const d = { id: snap.docs[0].id, ...snap.docs[0].data() };
-  dbg(
-    "Exercise doc:",
-    d.id,
-    "format=",
-    d.format,
-    "url=",
-    (d.url || "").slice(-32)
-  );
-  return d;
+  const s = await getDocs(q);
+  return s.empty ? null : { id: s.docs[0].id, ...s.docs[0].data() };
+}
+async function fetchExerciseSourcesFor(locId) {
+  const out = { webm: null, mp4_sbs: null, mp4: null };
+  const dWebm = await latestExerciseByFormatAtLoc("webm", locId);
+  const dSbs = await latestExerciseByFormatAtLoc("mp4_sbs", locId);
+  const dMp4 = await latestExerciseByFormatAtLoc("mp4", locId);
+
+  if (dWebm) out.webm = pickSourcesFromDoc(dWebm).webm || dWebm.url || null;
+  if (dSbs) out.mp4_sbs = pickSourcesFromDoc(dSbs).mp4_sbs || dSbs.url || null;
+  if (dMp4) out.mp4 = pickSourcesFromDoc(dMp4).mp4 || dMp4.url || null;
+
+  dbg("Exercise sources (by-format):", out);
+  return out;
 }
 
 async function logScan({ phone, loc, pos, ua, decision }) {
@@ -1123,7 +1095,6 @@ function showPhoneGate() {
         const phone = normalizeMnPhone(otpPhoneEl.value.trim());
         if (!auth.currentUser) await signInAnonymously(auth).catch(() => {});
 
-        // Байршил авах (permission аль хэдийн байгаа)
         let pos;
         try {
           pos = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 });
@@ -1139,7 +1110,6 @@ function showPhoneGate() {
           return;
         }
 
-        // Давхардлын шалгалт
         const ref = doc(db, "phone_regs", phone);
         const snap = await getDoc(ref).catch(() => null);
         if (snap && snap.exists()) {
@@ -1166,12 +1136,10 @@ function showPhoneGate() {
 
           otpGate.hidden = true;
           otpPhoneEl.value = "";
-          // Интро аль хэдийн дууссан тул одоо меню-г харуулна
           showMenuOverlay();
           return;
         }
 
-        // ШИНЭ бүртгэл
         try {
           await setDoc(
             ref,
@@ -1204,7 +1172,6 @@ function showPhoneGate() {
           return;
         }
 
-        // Лог
         const chk = await isWithinQrLocation(
           pos,
           QR_LOC_ID,
@@ -1227,7 +1194,6 @@ function showPhoneGate() {
 
         otpGate.hidden = true;
         otpPhoneEl.value = "";
-        // Бүртгэл амжилттай → меню рүү
         showMenuOverlay();
       } catch (e) {
         console.error(e);
@@ -1246,14 +1212,11 @@ function showPhoneGate() {
 
 /* ===== Init: gate/intro boot ===== */
 async function initGateOrAutoEnter() {
-  // Boot дээр зөвшөөрөл асуухгүй (gesture хэрэгтэй), gate-ээ түр нуусан байна
   otpGate.hidden = true;
 
-  // Бүртгэл байгаа эсэхийг тэмдэглээд л орхи (интро дуусахад ашиглана)
   const reg = await getRegistrationByDeviceKey();
   if (reg) REG_INFO = reg;
 
-  // Лог — зөвшөөрөлгүй тул gps=null
   await logScan({
     phone: reg?.phone || null,
     loc: QR_LOC_ID,
@@ -1264,7 +1227,6 @@ async function initGateOrAutoEnter() {
 }
 
 /* ===== main ===== */
-// Boot дээр автоматаар камера асаахгүй
 await signInAnonymously(auth).catch(() => {});
 makeVideoDecodeFriendly(vIntro);
 makeVideoDecodeFriendly(vEx);
@@ -1274,7 +1236,6 @@ await initGateOrAutoEnter();
 tapLay.addEventListener("pointerdown", async () => {
   tapLay.style.display = "none";
   try {
-    // 1) CAMERA + GEO-г нэг gesture дээр асууна
     try {
       await ensurePermissionsGate();
       dbg("Permission gate OK");
@@ -1285,14 +1246,12 @@ tapLay.addEventListener("pointerdown", async () => {
       return;
     }
 
-    // 2) Камераа асаана — AR бүрэн init болсны дараа
     try {
       await ensureCameraOnce();
     } catch (e) {
       dbg("camera on tap:", e?.message || e);
     }
 
-    // 3) Интро шууд эхлүүлнэ
     if (!window.__introStarted) {
       window.__introStarted = true;
       await startIntroFlow(true);
@@ -1385,16 +1344,14 @@ async function startIntroFlow(fromTap = false) {
     const introDoc = await fetchLatestIntro();
     if (!introDoc) {
       dbg("No global intro video");
-      // Интро байхгүй бол шууд бүртгэлийн үе шат руу
       await afterIntroGate();
       return;
     }
     const introSrc = pickSourcesFromDoc(introDoc);
     dbg("Intro sources:", introSrc);
 
-    // Exercise-ийг урьдчилан бэлдэх нь хэвээр
-    let exDoc = null,
-      exSrc = null,
+    // ---- Exercise урьдчилан бэлдэх (одоо формат тус бүрээр) ----
+    let exSrc = null,
       posNow = null,
       chk = null;
     if (QR_LOC_ID) {
@@ -1406,11 +1363,8 @@ async function startIntroFlow(fromTap = false) {
       chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
       dbg("IntroFlow within?", chk);
       if (chk.ok) {
-        exDoc = await fetchLatestExerciseFor(QR_LOC_ID);
-        if (exDoc) {
-          exSrc = pickSourcesFromDoc(exDoc);
-          dbg("Exercise sources:", exSrc);
-        }
+        exSrc = await fetchExerciseSourcesFor(QR_LOC_ID);
+        dbg("Exercise sources (preload):", exSrc);
       }
     }
 
@@ -1420,7 +1374,9 @@ async function startIntroFlow(fromTap = false) {
       introSrc.mp4,
       introSrc.mp4_sbs
     );
-    if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, exSrc.mp4_sbs);
+    if (exSrc && (exSrc.webm || exSrc.mp4 || exSrc.mp4_sbs)) {
+      await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, exSrc.mp4_sbs);
+    }
 
     if (vIntro.readyState < 1) {
       await new Promise((r) =>
@@ -1433,12 +1389,10 @@ async function startIntroFlow(fromTap = false) {
 
     hidePlane();
 
-    // opaque sniff
     let useIntroKind = introKind;
     const looksOpaqueIntro = await videoLooksOpaque(vIntro);
     if (looksOpaqueIntro && useIntroKind === "alpha") useIntroKind = "flat";
 
-    // Материал (SBS салаа нэмсэн)
     if (useIntroKind === "alpha") {
       planeUseMap(texIntro);
     } else if (useIntroKind === "sbs") {
@@ -1554,12 +1508,12 @@ async function startExerciseDirect() {
       return;
     }
 
-    const exDoc = await fetchLatestExerciseFor(QR_LOC_ID);
-    if (!exDoc) {
+    // ==== ШИНЭ: формат тус бүрээс хамгийн сүүлийг татах ====
+    const exSrc = await fetchExerciseSourcesFor(QR_LOC_ID);
+    if (!exSrc.webm && !exSrc.mp4 && !exSrc.mp4_sbs) {
       dbg("No exercise video for this location");
       return;
     }
-    const exSrc = pickSourcesFromDoc(exDoc);
     dbg("Exercise sources:", exSrc);
 
     const exKind = await setSourcesAwait(
@@ -1584,11 +1538,10 @@ async function startExerciseDirect() {
     const looksOpaqueEx = await videoLooksOpaque(vEx);
     if (looksOpaqueEx && useExKind === "alpha") useExKind = "flat";
 
-    // Материал (SBS салаа нэмсэн)
     if (useExKind === "alpha") {
       planeUseMap(texEx);
     } else if (useExKind === "sbs") {
-      planeUseShader(texEx); // <-- НЭМЭВ: SBS-alpha үед тусгай материал
+      planeUseShader(texEx);
     } else {
       planeUseChroma(texEx, {
         keyColor: 0x00ff00,
@@ -1638,7 +1591,6 @@ function planeUseMap(tex) {
   });
 }
 function planeUseShader(tex) {
-  // SBS-alpha үед
   import("./ar.js").then(({ plane, makeSbsAlphaMaterial }) => {
     plane.material?.dispose?.();
     plane.material = makeSbsAlphaMaterial(tex);
