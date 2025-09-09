@@ -616,21 +616,36 @@ function wireVideoDebug(v, tag) {
 }
 
 /* ===== Firestore queries ===== */
+// Intro: FORMAT-priority by device (iOS=mp4 first, Android/Desktop=webm first)
 async function fetchLatestIntro() {
-  const qs = [
-    fsQuery(collection(db, "videos"), where("active", "==", true), where("isGlobal", "==", true), limit(1)),
-    fsQuery(collection(db, "videos"), where("active", "==", true), where("name", "==", "intro"), limit(1)),
-  ];
-  for (const q of qs) {
+  const col = collection(db, "videos");
+  const fmtOrder = (isIOS === true)
+    ? ["mp4", "mp4_sbs", "webm", null]   // iOS-д MP4-ээ түрүүнд
+    : ["webm", "mp4_sbs", "mp4", null];  // Android/Desktop-д WEBM-ээ түрүүнд
+
+  const tryByFormat = async (fmt) => {
+    const parts = [
+      where("active", "==", true),
+      where("isGlobal", "==", true),
+    ];
+    if (fmt) parts.push(where("format", "==", fmt));
+
+    const q = fsQuery(col, ...parts, limit(1));
     const snap = await getDocs(q);
-    if (!snap.empty) {
-      const d = { id: snap.docs[0].id, ...snap.docs[0].data() };
-      dbg("Intro doc:", d.id, "format=", d.format, "url=", (d.url || "").slice(-32));
-      return d;
-    }
+    if (snap.empty) return null;
+
+    const d = { id: snap.docs[0].id, ...snap.docs[0].data() };
+    dbg("Intro doc:", d.id, "format=", d.format, "url=", (d.url || "").slice(-32));
+    return d;
+  };
+
+  for (const fmt of fmtOrder) {
+    const d = await tryByFormat(fmt);
+    if (d) return d;
   }
   return null;
 }
+
 
 // FORMAT-priority by device: iOS=mp4 first, Android/Desktop=webm first
 async function fetchLatestExerciseFor(locationId) {
