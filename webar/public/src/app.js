@@ -25,7 +25,10 @@ const dbg = (...a) => (_dbg ? _dbg("[AR]", ...a) : console.log("[AR]", ...a));
 window.addEventListener("unhandledrejection", (e) => {
   const r = e?.reason;
   const msg = String(r?.message || r || "");
-  if (r?.name === "AbortError" || /play\(\) request was interrupted/i.test(msg)) {
+  if (
+    r?.name === "AbortError" ||
+    /play\(\) request was interrupted/i.test(msg)
+  ) {
     e.preventDefault();
     dbg("Ignored AbortError from play():", msg);
   }
@@ -39,7 +42,10 @@ const ACCURACY_BUFFER_MAX = 75;
 /* ===== Firebase (ESM CDN) ===== */
 import { firebaseConfig } from "./firebase.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {
+  getAuth,
+  signInAnonymously,
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore,
   doc,
@@ -57,17 +63,30 @@ import {
 
 /* ===== Geolocation helpers ===== */
 let geoWatchId = null;
-function canGeolocate() { return "geolocation" in navigator; }
+function canGeolocate() {
+  return "geolocation" in navigator;
+}
 function getGeoOnce(options = {}) {
-  if (!canGeolocate()) return Promise.reject(new Error("Geolocation not supported"));
-  const opts = { enableHighAccuracy: true, timeout: 10000, maximumAge: 0, ...options };
+  if (!canGeolocate())
+    return Promise.reject(new Error("Geolocation not supported"));
+  const opts = {
+    enableHighAccuracy: true,
+    timeout: 10000,
+    maximumAge: 0,
+    ...options,
+  };
   return new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(resolve, reject, opts);
   });
 }
 function startGeoWatch(onUpdate, options = {}) {
   if (!canGeolocate()) throw new Error("Geolocation not supported");
-  const opts = { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000, ...options };
+  const opts = {
+    enableHighAccuracy: true,
+    timeout: 20000,
+    maximumAge: 5000,
+    ...options,
+  };
   if (geoWatchId != null) stopGeoWatch();
   geoWatchId = navigator.geolocation.watchPosition(
     (pos) => onUpdate?.(pos, null),
@@ -84,7 +103,9 @@ function stopGeoWatch() {
 function fmtLoc(pos) {
   if (!pos) return "";
   const { latitude, longitude, accuracy } = pos.coords || {};
-  return `GPS lat=${latitude?.toFixed(6)} lng=${longitude?.toFixed(6)} ±${Math.round(accuracy || 0)}m`;
+  return `GPS lat=${latitude?.toFixed(6)} lng=${longitude?.toFixed(
+    6
+  )} ±${Math.round(accuracy || 0)}m`;
 }
 
 /* ===== Query param ===== */
@@ -100,7 +121,8 @@ function normalizeMnPhone(raw = "") {
   const digits = String(raw).replace(/\D/g, "");
   if (/^\+976\d{8}$/.test(raw)) return raw;
   if (/^\d{8}$/.test(digits)) return `+976${digits}`;
-  if (/^\+?[1-9]\d{7,14}$/.test(raw)) return raw.startsWith("+") ? raw : `+${raw}`;
+  if (/^\+?[1-9]\d{7,14}$/.test(raw))
+    return raw.startsWith("+") ? raw : `+${raw}`;
   throw new Error("Утасны дугаар буруу байна. (+976XXXXXXXX хэлбэр)");
 }
 
@@ -120,20 +142,21 @@ let introLoading = false;
 let exLoading = false;
 
 // ===== Back → Menu логик (шинэ) =====
-async function backToMenuFromExercise(){
+async function backToMenuFromExercise() {
   try {
-    try { vEx?.pause?.(); } catch {}
-    hidePlane();        // дүрсийг түр нууж цагаан анивчлалас сэргийлнэ
+    try {
+      vEx?.pause?.();
+    } catch {}
+    hidePlane(); // дүрсийг түр нууж цагаан анивчлалас сэргийлнэ
     currentVideo = null;
-    showMenuOverlay();  // менюг буцааж харуулна (ui.js дотор Back товчийг автоматаар нуух тохируулгатай)
+    showMenuOverlay(); // менюг буцааж харуулна (ui.js дотор Back товчийг автоматаар нуух тохируулгатай)
   } finally {
-    hideBackButton();   // давхар баталгаажуулж нууж байна
+    hideBackButton(); // давхар баталгаажуулж нууж байна
   }
 }
 
 // Нэг л удаа click handler холбох
 onBackButton(backToMenuFromExercise);
-
 
 /* ===== Firebase ===== */
 const fbApp = initializeApp(firebaseConfig);
@@ -148,14 +171,30 @@ const MEDIA_ERR = {
   4: "MEDIA_ERR_SRC_NOT_SUPPORTED (src/type unsupported)",
 };
 const readReadyState = (rs) =>
-  `${rs} (${["HAVE_NOTHING", "HAVE_METADATA", "HAVE_CURRENT_DATA", "HAVE_FUTURE_DATA", "HAVE_ENOUGH_DATA"][rs] || "?"})`;
+  `${rs} (${
+    [
+      "HAVE_NOTHING",
+      "HAVE_METADATA",
+      "HAVE_CURRENT_DATA",
+      "HAVE_FUTURE_DATA",
+      "HAVE_ENOUGH_DATA",
+    ][rs] || "?"
+  })`;
 const readNetworkState = (ns) =>
-  `${ns} (${["NETWORK_EMPTY", "NETWORK_IDLE", "NETWORK_LOADING", "NETWORK_NO_SOURCE"][ns] || "?"})`;
+  `${ns} (${
+    ["NETWORK_EMPTY", "NETWORK_IDLE", "NETWORK_LOADING", "NETWORK_NO_SOURCE"][
+      ns
+    ] || "?"
+  })`;
 function logVideoError(v, tag = "video") {
   const code = v?.error?.code ?? 0;
   dbg(`[${tag}] VIDEO ERROR: code=${code} ${MEDIA_ERR[code] || "Unknown"}`);
   dbg(`[${tag}] src=${v.currentSrc || v.src || "(no src)"}`);
-  dbg(`[${tag}] readyState=${readReadyState(v.readyState)} networkState=${readNetworkState(v.networkState)}`);
+  dbg(
+    `[${tag}] readyState=${readReadyState(
+      v.readyState
+    )} networkState=${readNetworkState(v.networkState)}`
+  );
   try {
     const ct =
       v.dataset?.srcType ||
@@ -165,9 +204,17 @@ function logVideoError(v, tag = "video") {
     navigator.mediaCapabilities
       ?.decodingInfo?.({
         type: "file",
-        video: { contentType: ct, width: v.videoWidth || 640, height: v.videoHeight || 360, bitrate: 1_000_000, framerate: 30 },
+        video: {
+          contentType: ct,
+          width: v.videoWidth || 640,
+          height: v.videoHeight || 360,
+          bitrate: 1_000_000,
+          framerate: 30,
+        },
       })
-      .then((info) => dbg(`[${tag}] mediaCapabilities: ${JSON.stringify(info)}`))
+      .then((info) =>
+        dbg(`[${tag}] mediaCapabilities: ${JSON.stringify(info)}`)
+      )
       .catch(() => {});
   } catch {}
 }
@@ -186,13 +233,18 @@ async function thereIsCameraDevice() {
     const hasVideo = list.some((d) => d.kind === "videoinput");
     if (!hasVideo) dbg("enumerateDevices: no videoinput found");
     return hasVideo || isIOS; // iOS заримдаа хоосон буудаг — true гэж үзье
-  } catch { return true; }
+  } catch {
+    return true;
+  }
 }
 
 async function logPermissionStates() {
   if (!navigator.permissions?.query) return;
   for (const n of ["camera", "geolocation"]) {
-    try { const st = await navigator.permissions.query({ name: n }); dbg(`perm[${n}] =`, st.state); } catch {}
+    try {
+      const st = await navigator.permissions.query({ name: n });
+      dbg(`perm[${n}] =`, st.state);
+    } catch {}
   }
 }
 
@@ -208,41 +260,68 @@ function attachToHiddenVideoOnce(stream) {
       makeVideoDecodeFriendly(v);
       v.srcObject = stream;
       const done = () => {
-        try { v.pause(); } catch {}
-        try { v.srcObject = null; } catch {}
+        try {
+          v.pause();
+        } catch {}
+        try {
+          v.srcObject = null;
+        } catch {}
         resolve();
       };
-      const onLoaded = () => { requestAnimationFrame(done); };
+      const onLoaded = () => {
+        requestAnimationFrame(done);
+      };
       v.addEventListener("loadedmetadata", onLoaded, { once: true });
       v.addEventListener("error", done, { once: true });
       v.play().catch(() => done());
-    } catch { resolve(); }
+    } catch {
+      resolve();
+    }
   });
 }
-function stopAll(stream) { try { stream?.getTracks?.().forEach(t => t.stop()); } catch {} }
+function stopAll(stream) {
+  try {
+    stream?.getTracks?.().forEach((t) => t.stop());
+  } catch {}
+}
 
 async function requestCameraOnce() {
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error("Камер ашиглах боломжгүй төхөөрөмж.");
+  if (!navigator.mediaDevices?.getUserMedia)
+    throw new Error("Камер ашиглах боломжгүй төхөөрөмж.");
   await logPermissionStates();
 
   if (navigator.permissions?.query) {
     try {
       const st = await navigator.permissions.query({ name: "camera" });
       if (st.state === "denied") {
-        throw new Error("Камерын зөвшөөрөл хаалттай байна. Settings → Safari → Camera → Allow (эсвэл Ask) болгож, хуудсаа Refresh хийнэ үү.");
+        throw new Error(
+          "Камерын зөвшөөрөл хаалттай байна. Settings → Safari → Camera → Allow (эсвэл Ask) болгож, хуудсаа Refresh хийнэ үү."
+        );
       }
     } catch {}
   }
 
-  if (CAM_PROMPTED) { dbg("camera already prompted – skip duplicate getUserMedia"); return true; }
+  if (CAM_PROMPTED) {
+    dbg("camera already prompted – skip duplicate getUserMedia");
+    return true;
+  }
   if (CAM_REQ_IN_FLIGHT) {
     dbg("camera request in-flight – wait");
-    await new Promise((r) => { const id = setInterval(() => { if (!CAM_REQ_IN_FLIGHT) { clearInterval(id); r(); } }, 50); });
+    await new Promise((r) => {
+      const id = setInterval(() => {
+        if (!CAM_REQ_IN_FLIGHT) {
+          clearInterval(id);
+          r();
+        }
+      }, 50);
+    });
     return CAM_PROMPTED;
   }
 
   if (!(await thereIsCameraDevice())) {
-    throw new Error("Камер олдсонгүй. Өөр апп камер ашиглаж байгаа эсэхээ шалгаад дахин оролдоно уу.");
+    throw new Error(
+      "Камер олдсонгүй. Өөр апп камер ашиглаж байгаа эсэхээ шалгаад дахин оролдоно уу."
+    );
   }
 
   CAM_REQ_IN_FLIGHT = true;
@@ -250,26 +329,57 @@ async function requestCameraOnce() {
   const tryWithTimeout = (constraints, label, ms = 16000) =>
     new Promise((resolve, reject) => {
       let done = false;
-      const to = setTimeout(() => { if (!done) { done = true; reject(new Error(`Camera request timed out: ${label}`)); } }, ms);
+      const to = setTimeout(() => {
+        if (!done) {
+          done = true;
+          reject(new Error(`Camera request timed out: ${label}`));
+        }
+      }, ms);
 
       dbg("getUserMedia →", label);
       navigator.mediaDevices.getUserMedia(constraints).then(
         async (stream) => {
-          if (done) { stopAll(stream); return; }
-          clearTimeout(to); done = true;
-          try { await attachToHiddenVideoOnce(stream); } catch {} finally { stopAll(stream); }
+          if (done) {
+            stopAll(stream);
+            return;
+          }
+          clearTimeout(to);
+          done = true;
+          try {
+            await attachToHiddenVideoOnce(stream);
+          } catch {
+          } finally {
+            stopAll(stream);
+          }
           resolve(stream);
         },
-        (err) => { if (done) return; clearTimeout(to); done = true; reject(err); }
+        (err) => {
+          if (done) return;
+          clearTimeout(to);
+          done = true;
+          reject(err);
+        }
       );
     });
 
   const attempts = [
-    [{ video: { facingMode: { exact: "environment" } }, audio: false }, "env-exact"],
-    [{ video: { facingMode: { ideal: "environment" } }, audio: false }, "env-ideal"],
+    [
+      { video: { facingMode: { exact: "environment" } }, audio: false },
+      "env-exact",
+    ],
+    [
+      { video: { facingMode: { ideal: "environment" } }, audio: false },
+      "env-ideal",
+    ],
     [{ video: true, audio: false }, "video:true"],
     [{ video: { facingMode: "user" }, audio: false }, "user"],
-    [{ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }, "1280x720"],
+    [
+      {
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      },
+      "1280x720",
+    ],
   ];
 
   let lastErr;
@@ -279,41 +389,78 @@ async function requestCameraOnce() {
         await tryWithTimeout(c, label);
         CAM_PROMPTED = true;
         return true;
-      } catch (e) { lastErr = e; dbg("camera attempt failed:", label, e?.name || e?.message || e); }
+      } catch (e) {
+        lastErr = e;
+        dbg("camera attempt failed:", label, e?.name || e?.message || e);
+      }
     }
     const name = lastErr?.name;
-    if (name === "NotAllowedError") throw new Error("Камерын зөвшөөрөл хаалттай байна. Settings → Safari → Camera → Allow (эсвэл Ask) болгож, хуудсаа Refresh хийнэ үү.");
-    if (name === "NotFoundError") throw new Error("Камер олдсонгүй. Өөр апп камер ашиглаж байгаа эсэхээ шалгаад дахин оролдоно уу.");
-    throw new Error("Камерт хандах боломжгүй: " + (lastErr?.message || lastErr));
-  } finally { CAM_REQ_IN_FLIGHT = false; }
+    if (name === "NotAllowedError")
+      throw new Error(
+        "Камерын зөвшөөрөл хаалттай байна. Settings → Safari → Camera → Allow (эсвэл Ask) болгож, хуудсаа Refresh хийнэ үү."
+      );
+    if (name === "NotFoundError")
+      throw new Error(
+        "Камер олдсонгүй. Өөр апп камер ашиглаж байгаа эсэхээ шалгаад дахин оролдоно уу."
+      );
+    throw new Error(
+      "Камерт хандах боломжгүй: " + (lastErr?.message || lastErr)
+    );
+  } finally {
+    CAM_REQ_IN_FLIGHT = false;
+  }
 }
 
 async function requestGeoInGesture(opts = {}) {
   return new Promise((resolve, reject) => {
     try {
-      const options = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0, ...opts };
+      const options = {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
+        ...opts,
+      };
       let cleaned = false;
       let watchId = null;
       const cleanup = () => {
         if (cleaned) return;
         cleaned = true;
-        try { if (watchId != null) navigator.geolocation.clearWatch(watchId); } catch {}
+        try {
+          if (watchId != null) navigator.geolocation.clearWatch(watchId);
+        } catch {}
       };
       // 1) Түр watch — эхний callback дээр шууд дуусгана
       watchId = navigator.geolocation.watchPosition(
-        (pos) => { cleanup(); resolve(pos); },
-        (err) => { cleanup(); reject(err); },
+        (pos) => {
+          cleanup();
+          resolve(pos);
+        },
+        (err) => {
+          cleanup();
+          reject(err);
+        },
         options
       );
       // 2) Давхар safeguard: getCurrentPosition
       navigator.geolocation.getCurrentPosition(
-        (pos) => { cleanup(); resolve(pos); },
-        (err) => { cleanup(); reject(err); },
+        (pos) => {
+          cleanup();
+          resolve(pos);
+        },
+        (err) => {
+          cleanup();
+          reject(err);
+        },
         options
       );
       // 3) Extra timeout
-      setTimeout(() => { cleanup(); reject(new Error("Гео: хугацаа хэтэрлээ")); }, options.timeout + 2000);
-    } catch (e) { reject(e); }
+      setTimeout(() => {
+        cleanup();
+        reject(new Error("Гео: хугацаа хэтэрлээ"));
+      }, options.timeout + 2000);
+    } catch (e) {
+      reject(e);
+    }
   });
 }
 
@@ -323,13 +470,23 @@ async function ensurePermissionsGate() {
   const camP = requestCameraOnce();
   try {
     const [_cam, pos] = await Promise.all([
-      camP.catch(e => { throw e; }),
-      geoP.catch(e => { throw e; }),
+      camP.catch((e) => {
+        throw e;
+      }),
+      geoP.catch((e) => {
+        throw e;
+      }),
     ]);
     return pos;
   } catch (e) {
-    if (e?.code === 1) throw new Error("Байршлын зөвшөөрөл хэрэгтэй. Settings → Safari → Location → While Using the App болгож, дахин оролдоно уу.");
-    if (e?.code === 2) throw new Error("GPS дохио сул байна. Илүү нээлттэй газар дахин оролдоно уу.");
+    if (e?.code === 1)
+      throw new Error(
+        "Байршлын зөвшөөрөл хэрэгтэй. Settings → Safari → Location → While Using the App болгож, дахин оролдоно уу."
+      );
+    if (e?.code === 2)
+      throw new Error(
+        "GPS дохио сул байна. Илүү нээлттэй газар дахин оролдоно уу."
+      );
     throw new Error(e?.message || "Зөвшөөрөл амжилтгүй.");
   }
 }
@@ -337,15 +494,24 @@ async function ensurePermissionsGate() {
 /* ===== helpers ===== */
 async function safePlay(v) {
   if (!v) return;
-  try { await v.play(); }
-  catch (e) { if (e?.name === "AbortError") dbg("play() aborted (new load?)"); else throw e; }
+  try {
+    await v.play();
+  } catch (e) {
+    if (e?.name === "AbortError") dbg("play() aborted (new load?)");
+    else throw e;
+  }
 }
 function makeVideoDecodeFriendly(v) {
   try {
     v.removeAttribute("hidden");
     Object.assign(v.style, {
-      position: "fixed", left: "-9999px", top: "-9999px",
-      width: "1px", height: "1px", opacity: "0", pointerEvents: "none",
+      position: "fixed",
+      left: "-9999px",
+      top: "-9999px",
+      width: "1px",
+      height: "1px",
+      opacity: "0",
+      pointerEvents: "none",
     });
   } catch {}
 }
@@ -353,7 +519,10 @@ function makeVideoDecodeFriendly(v) {
 /* ===== AR init (single-flight) ===== */
 let __arReady = false;
 const __arInitP = initAR()
-  .then(() => { __arReady = true; dbg("initAR OK"); })
+  .then(() => {
+    __arReady = true;
+    dbg("initAR OK");
+  })
   .catch((e) => {
     console.error("initAR failed:", e);
     dbg("initAR failed:", e?.message || e);
@@ -364,12 +533,17 @@ const __arInitP = initAR()
 let __camPromise = null;
 async function ensureCameraOnce() {
   // ✅ AR бүрэн инициализ дуустал хүлээж байж камер луу орно (iOS race fix)
-  try { if (!__arReady) await __arInitP; } catch {}
+  try {
+    if (!__arReady) await __arInitP;
+  } catch {}
   if (__camPromise) return __camPromise;
   if (typeof ensureCamera !== "function") {
     throw new Error("AR engine is not ready (ensureCamera missing)");
   }
-  __camPromise = ensureCamera().catch((e) => { __camPromise = null; throw e; });
+  __camPromise = ensureCamera().catch((e) => {
+    __camPromise = null;
+    throw e;
+  });
   return __camPromise;
 }
 
@@ -377,8 +551,16 @@ async function ensureCameraOnce() {
 async function waitReady(v, minRS = 2) {
   if (v.readyState >= minRS) return;
   await new Promise((resolve) => {
-    const ok = () => { if (v.readyState >= minRS) { cleanup(); resolve(); } };
-    const to = setTimeout(() => { cleanup(); resolve(); }, 1500);
+    const ok = () => {
+      if (v.readyState >= minRS) {
+        cleanup();
+        resolve();
+      }
+    };
+    const to = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, 1500);
     const cleanup = () => {
       clearTimeout(to);
       v.removeEventListener("loadeddata", ok);
@@ -397,14 +579,17 @@ async function videoLooksOpaque(v) {
     const w = Math.max(2, Math.min(64, v.videoWidth || 0));
     const h = Math.max(2, Math.min(64, v.videoHeight || 0));
     const cv = document.createElement("canvas");
-    cv.width = w; cv.height = h;
+    cv.width = w;
+    cv.height = h;
     const ctx = cv.getContext("2d", { willReadFrequently: true });
     ctx.drawImage(v, 0, 0, w, h);
     const a = ctx.getImageData(0, 0, w, h).data;
     let minA = 255;
     for (let i = 3; i < a.length; i += 4) if (a[i] < minA) minA = a[i];
     return minA > 250;
-  } catch { return true; }
+  } catch {
+    return true;
+  }
 }
 
 /* ===== Location match helpers ===== */
@@ -413,30 +598,64 @@ async function fetchLocationById(id) {
   const d = await getDoc(doc(db, "locations", id)).catch(() => null);
   if (!d?.exists()) return null;
   const { lat, lng, name, radiusMeters } = d.data() || {};
-  return { id: d.id, name: name || null, lat: Number(lat), lng: Number(lng), radiusMeters: Number(radiusMeters || 0) };
+  return {
+    id: d.id,
+    name: name || null,
+    lat: Number(lat),
+    lng: Number(lng),
+    radiusMeters: Number(radiusMeters || 0),
+  };
 }
 function distanceMeters(a, b) {
-  const R = 6371000, toRad = (x) => (x * Math.PI) / 180;
-  const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
-  const la1 = toRad(a.lat), la2 = toRad(b.lat);
-  const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(Math.abs(dLng)/2)**2;
+  const R = 6371000,
+    toRad = (x) => (x * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat),
+    dLng = toRad(b.lng - a.lng);
+  const la1 = toRad(a.lat),
+    la2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(la1) * Math.cos(la2) * Math.sin(Math.abs(dLng) / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
-async function isWithinQrLocation(pos, qrLocId, fallbackRadius = DEFAULT_LOC_RADIUS_M) {
+async function isWithinQrLocation(
+  pos,
+  qrLocId,
+  fallbackRadius = DEFAULT_LOC_RADIUS_M
+) {
   const loc = await fetchLocationById(qrLocId);
   if (!loc || !pos?.coords) {
-    return { ok: false, reason: !loc ? "loc-missing" : "gps-missing", loc, dist: null, radius: fallbackRadius, buffer: 0 };
+    return {
+      ok: false,
+      reason: !loc ? "loc-missing" : "gps-missing",
+      loc,
+      dist: null,
+      radius: fallbackRadius,
+      buffer: 0,
+    };
   }
-  const user = { lat: Number(pos.coords.latitude), lng: Number(pos.coords.longitude) };
+  const user = {
+    lat: Number(pos.coords.latitude),
+    lng: Number(pos.coords.longitude),
+  };
   const dist = distanceMeters(user, { lat: loc.lat, lng: loc.lng });
   const radius = loc.radiusMeters > 0 ? loc.radiusMeters : fallbackRadius;
-  const buffer = Math.min(Number(pos.coords.accuracy || 0), ACCURACY_BUFFER_MAX);
+  const buffer = Math.min(
+    Number(pos.coords.accuracy || 0),
+    ACCURACY_BUFFER_MAX
+  );
   const ok = dist <= radius + buffer;
   return { ok, reason: ok ? "ok" : "too-far", loc, dist, radius, buffer };
 }
 
 /* ===== Format & source helpers ===== */
-function cleanUrl(u = "") { return (String(u || "").trim().replace(/^['"]+|['"]+$/g, "") || null); }
+function cleanUrl(u = "") {
+  return (
+    String(u || "")
+      .trim()
+      .replace(/^['"]+|['"]+$/g, "") || null
+  );
+}
 function normFormat(x = "") {
   const s = String(x).toLowerCase();
   if (s.includes("webm")) return "webm";
@@ -444,28 +663,68 @@ function normFormat(x = "") {
   if (s.includes("mp4")) return "mp4";
   return s;
 }
+// --- replace your extFromUrl + pickSourcesFromDoc with this ---
+
 function extFromUrl(u = "") {
-  try { return (new URL(u).pathname.match(/\.([a-z0-9]+)$/i)?.[1] || "").toLowerCase(); }
-  catch { return ""; }
+  try {
+    const url = new URL(u);
+    const pathExt = (
+      url.pathname.match(/\.([a-z0-9]+)$/i)?.[1] || ""
+    ).toLowerCase();
+    const q = (url.search + url.hash).toLowerCase();
+    // Хэрвээ query/hash-д шууд хэлбэр нь туссан бол тэрийг давуу болгоё
+    if (/webm/.test(q)) return "webm";
+    if (
+      /(^|[_-])sbs([_.-]|$)/.test(url.pathname) ||
+      /mp4_sbs/.test(q) ||
+      /sbs=1/.test(q)
+    )
+      return "mp4_sbs";
+    return pathExt;
+  } catch {
+    return "";
+  }
 }
 
-// Firestore doc: { url, format }
+function normFormat(x = "") {
+  const s = String(x).toLowerCase();
+  if (s.includes("webm")) return "webm";
+  if (s.includes("mp4_sbs") || /(^|[^a-z])sbs([^a-z]|$)/.test(s))
+    return "mp4_sbs";
+  if (s.includes("mp4") || s.includes("mov")) return "mp4";
+  return s;
+}
+
+// Firestore doc -> unified sources
 function pickSourcesFromDoc(doc) {
   const out = { webm: null, mp4_sbs: null, mp4: null };
-  const url = cleanUrl(doc?.url);
-  if (!url) return out;
 
-  const ext = extFromUrl(url);
-  const hasSbsTag = /(?:^|[_-])sbs(?:[_-]|\.|$)/i.test(url) || /_sbs\.(mp4|mov)$/i.test(url);
+  // 1) Хэрэв тусдаа талбарууд байвал шууд уншина
+  const directWebm = cleanUrl(doc?.webm || doc?.alphaUrl);
+  const directSbs = cleanUrl(doc?.mp4Sbs || doc?.sbs || doc?.stereo);
+  const directMp4 = cleanUrl(doc?.mp4 || doc?.flat || doc?.urlFlat);
 
-  if (ext === "webm") out.webm = url;
-  else if (ext === "mp4" || ext === "mov") { if (hasSbsTag) out.mp4_sbs = url; else out.mp4 = url; }
+  if (directWebm) out.webm = directWebm;
+  if (directSbs) out.mp4_sbs = directSbs;
+  if (directMp4) out.mp4 = directMp4;
 
+  // 2) Ерөнхий url талбараас төрөл тодорхойлох
+  const mainUrl = cleanUrl(doc?.url);
+  if (mainUrl) {
+    const ext = extFromUrl(mainUrl);
+    const hasSbsTag = /(\/|^|[_-])sbs([_.-]|$)/i.test(mainUrl);
+    if (!out.webm && ext === "webm") out.webm = mainUrl;
+    else if (hasSbsTag || ext === "mp4_sbs") out.mp4_sbs ||= mainUrl;
+    else if (!out.mp4 && (ext === "mp4" || ext === "mov" || ext === ""))
+      out.mp4 = mainUrl;
+  }
+
+  // 3) format талбарыг дахиад шалгая
   if (!out.webm && !out.mp4_sbs && !out.mp4) {
     const fmt = normFormat(doc?.format || "");
-    if (fmt === "webm") out.webm = url;
-    else if (fmt === "mp4_sbs") out.mp4_sbs = url;
-    else if (fmt === "mp4") out.mp4 = url;
+    if (fmt === "webm") out.webm = mainUrl;
+    else if (fmt === "mp4_sbs") out.mp4_sbs = mainUrl;
+    else if (fmt === "mp4") out.mp4 = mainUrl;
   }
 
   dbg("pickSources:", out);
@@ -473,31 +732,44 @@ function pickSourcesFromDoc(doc) {
 }
 
 /* ---- Cloudinary seek hack ---- */
-function isCloudinary(u) { try { return /res\.cloudinary\.com/.test(new URL(u).host); } catch { return false; } }
-function withSeekHack(u) { if (!u) return u; return isCloudinary(u) ? u + (u.includes("#") ? "" : "#t=0.001") : u; }
+function isCloudinary(u) {
+  try {
+    return /res\.cloudinary\.com/.test(new URL(u).host);
+  } catch {
+    return false;
+  }
+}
+function withSeekHack(u) {
+  if (!u) return u;
+  return isCloudinary(u) ? u + (u.includes("#") ? "" : "#t=0.001") : u;
+}
 
 /* Candidates for device (UPDATED) */
 function pickBestForDevice({ webm, mp4_sbs, mp4 }) {
   const isiOSDevice = isIOS === true;
   const list = [];
-  const push = (url, kind, type = null) => { if (url) list.push({ url, type, kind }); };
+  const push = (url, kind, type = null) => {
+    if (url) list.push({ url, type, kind });
+  };
 
   if (isiOSDevice) {
     // iOS: WEBM битгий оролд — шууд MP4-уудыг туршиж үзнэ
     push(mp4_sbs, "sbs", "video/mp4");
-    push(mp4,     "flat", "video/mp4");
+    push(mp4, "flat", "video/mp4");
   } else {
     // Android/Desktop: эхлээд WEBM (alpha), дараа нь MP4(SBS→flat)
-    push(webm,    "alpha", 'video/webm; codecs="vp8,opus"');
-    push(mp4_sbs, "sbs",   "video/mp4");
-    push(mp4,     "flat",  "video/mp4");
+    push(webm, "alpha", 'video/webm; codecs="vp8,opus"');
+    push(mp4_sbs, "sbs", "video/mp4");
+    push(mp4, "flat", "video/mp4");
   }
   return list;
 }
 
 /* ===== Robust video loader ===== */
 async function setSourcesAwait(v, webm, mp4, mp4_sbs) {
-  try { v.pause?.(); } catch {}
+  try {
+    v.pause?.();
+  } catch {}
   v.removeAttribute("src");
   while (v.firstChild) v.removeChild(v.firstChild);
 
@@ -517,10 +789,30 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs) {
 
   const attempts = [];
   for (const c of base) {
-    const plain     = { ...c, label: c.kind + "|no-seek|sniff", url: c.url, type: null };
-    const plainTyped= { ...c, label: c.kind + "|no-seek|typed", url: c.url, type: c.type };
-    const seek      = { ...c, label: c.kind + "|seek|sniff",    url: withSeekHack(c.url), type: null };
-    const seekTyped = { ...c, label: c.kind + "|seek|typed",    url: withSeekHack(c.url), type: c.type };
+    const plain = {
+      ...c,
+      label: c.kind + "|no-seek|sniff",
+      url: c.url,
+      type: null,
+    };
+    const plainTyped = {
+      ...c,
+      label: c.kind + "|no-seek|typed",
+      url: c.url,
+      type: c.type,
+    };
+    const seek = {
+      ...c,
+      label: c.kind + "|seek|sniff",
+      url: withSeekHack(c.url),
+      type: null,
+    };
+    const seekTyped = {
+      ...c,
+      label: c.kind + "|seek|typed",
+      url: withSeekHack(c.url),
+      type: c.type,
+    };
     attempts.push(plain, plainTyped, seek, seekTyped);
   }
 
@@ -555,9 +847,12 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs) {
 
       const to = setTimeout(() => finishErr("timeout"), TIMEOUT_MS);
 
-      const onAbort = () => { dbg("VIDEO abort (ignore, keep waiting)"); };
+      const onAbort = () => {
+        dbg("VIDEO abort (ignore, keep waiting)");
+      };
       const onError = () => {
-        if (v.networkState === 3 && v.readyState === 0) finishErr("NETWORK_NO_SOURCE");
+        if (v.networkState === 3 && v.readyState === 0)
+          finishErr("NETWORK_NO_SOURCE");
         else finishErr("error");
       };
       const onCanPlay = () => finishOk();
@@ -593,7 +888,11 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs) {
       await tryOnce(a);
       const kind =
         a.kind ||
-        (a.type === "video/webm" ? "alpha" : a.label.includes("sbs") ? "sbs" : "flat");
+        (a.type === "video/webm"
+          ? "alpha"
+          : a.label.includes("sbs")
+          ? "sbs"
+          : "flat");
       return kind;
     } catch (e) {
       logVideoError(v, "candidate");
@@ -606,26 +905,66 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs) {
 /* ===== Debug events ===== */
 function wireVideoDebug(v, tag) {
   const log = (ev) =>
-    dbg(`[${tag}]`, ev.type, "t=", (v.currentTime || 0).toFixed(2), "rs=", v.readyState, "ns=", v.networkState);
+    dbg(
+      `[${tag}]`,
+      ev.type,
+      "t=",
+      (v.currentTime || 0).toFixed(2),
+      "rs=",
+      v.readyState,
+      "ns=",
+      v.networkState
+    );
   [
-    "loadstart", "loadedmetadata", "loadeddata", "canplay", "canplaythrough",
-    "play", "playing", "pause", "waiting", "stalled", "suspend", "abort",
-    "error", "ended", "timeupdate",
-  ].forEach((t) => { v.addEventListener(t, log); });
+    "loadstart",
+    "loadedmetadata",
+    "loadeddata",
+    "canplay",
+    "canplaythrough",
+    "play",
+    "playing",
+    "pause",
+    "waiting",
+    "stalled",
+    "suspend",
+    "abort",
+    "error",
+    "ended",
+    "timeupdate",
+  ].forEach((t) => {
+    v.addEventListener(t, log);
+  });
   v.addEventListener("error", () => logVideoError(v, tag));
 }
 
 /* ===== Firestore queries ===== */
 async function fetchLatestIntro() {
   const qs = [
-    fsQuery(collection(db, "videos"), where("active", "==", true), where("isGlobal", "==", true), limit(1)),
-    fsQuery(collection(db, "videos"), where("active", "==", true), where("name", "==", "intro"), limit(1)),
+    fsQuery(
+      collection(db, "videos"),
+      where("active", "==", true),
+      where("isGlobal", "==", true),
+      limit(1)
+    ),
+    fsQuery(
+      collection(db, "videos"),
+      where("active", "==", true),
+      where("name", "==", "intro"),
+      limit(1)
+    ),
   ];
   for (const q of qs) {
     const snap = await getDocs(q);
     if (!snap.empty) {
       const d = { id: snap.docs[0].id, ...snap.docs[0].data() };
-      dbg("Intro doc:", d.id, "format=", d.format, "url=", (d.url || "").slice(-32));
+      dbg(
+        "Intro doc:",
+        d.id,
+        "format=",
+        d.format,
+        "url=",
+        (d.url || "").slice(-32)
+      );
       return d;
     }
   }
@@ -644,7 +983,14 @@ async function fetchLatestExerciseFor(locationId) {
   const snap = await getDocs(q);
   if (snap.empty) return null;
   const d = { id: snap.docs[0].id, ...snap.docs[0].data() };
-  dbg("Exercise doc:", d.id, "format=", d.format, "url=", (d.url || "").slice(-32));
+  dbg(
+    "Exercise doc:",
+    d.id,
+    "format=",
+    d.format,
+    "url=",
+    (d.url || "").slice(-32)
+  );
   return d;
 }
 
@@ -689,12 +1035,20 @@ async function updateRegHeartbeat(phone, pos) {
       },
       { merge: true }
     );
-  } catch (e) { dbg("updateRegHeartbeat failed:", e?.code || e?.message || e); }
+  } catch (e) {
+    dbg("updateRegHeartbeat failed:", e?.code || e?.message || e);
+  }
 }
 
 /* ---- DeviceKey (uid-с ангид) ---- */
-async function makeDeviceKeyBytes() { const b = new Uint8Array(32); crypto.getRandomValues(b); return b; }
-function b64(buf) { return btoa(String.fromCharCode(...buf)); }
+async function makeDeviceKeyBytes() {
+  const b = new Uint8Array(32);
+  crypto.getRandomValues(b);
+  return b;
+}
+function b64(buf) {
+  return btoa(String.fromCharCode(...buf));
+}
 function fromB64(s) {
   const bin = atob(s);
   const out = new Uint8Array(bin.length);
@@ -704,7 +1058,9 @@ function fromB64(s) {
 async function sha256Hex(bytes) {
   const dig = await crypto.subtle.digest("SHA-256", bytes);
   const arr = new Uint8Array(dig);
-  return Array.from(arr).map((x) => x.toString(16).padStart(2, "0")).join("");
+  return Array.from(arr)
+    .map((x) => x.toString(16).padStart(2, "0"))
+    .join("");
 }
 const LS_KEY = "webar_reg_key";
 
@@ -721,8 +1077,16 @@ async function bindDeviceToPhone(phone) {
   }
   const hashHex = await sha256Hex(devBytes);
 
-  await setDoc(doc(db, "device_keys", hashHex), { phone, createdAt: serverTimestamp() }, { merge: true });
-  await setDoc(doc(db, "phone_regs", phone), { deviceKeyHashes: arrayUnion(hashHex) }, { merge: true });
+  await setDoc(
+    doc(db, "device_keys", hashHex),
+    { phone, createdAt: serverTimestamp() },
+    { merge: true }
+  );
+  await setDoc(
+    doc(db, "phone_regs", phone),
+    { deviceKeyHashes: arrayUnion(hashHex) },
+    { merge: true }
+  );
 
   dbg("Device bound:", hashHex.slice(0, 12), "… =>", phone);
 }
@@ -754,90 +1118,136 @@ function showPhoneGate() {
   if (gateWired) return;
   gateWired = true;
 
-  btnSendCode?.addEventListener("click", async () => {
-    if (gateBusy) return;
-    gateBusy = true;
-    btnSendCode.disabled = true;
-    try {
-      otpError.textContent = "";
-      const phone = normalizeMnPhone(otpPhoneEl.value.trim());
-      if (!auth.currentUser) await signInAnonymously(auth).catch(() => {});
-
-      // Байршил авах (permission аль хэдийн байгаа)
-      let pos;
+  btnSendCode?.addEventListener(
+    "click",
+    async () => {
+      if (gateBusy) return;
+      gateBusy = true;
+      btnSendCode.disabled = true;
       try {
-        pos = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 });
-        dbg("Gate position:", fmtLoc(pos));
-      } catch (e) {
-        otpError.textContent = e?.code === 1 ? "Байршлын зөвшөөрөл хэрэгтэй байна." : "Байршил олдсонгүй.";
-        setTimeout(() => { otpError.textContent = ""; }, 3500);
-        return;
-      }
+        otpError.textContent = "";
+        const phone = normalizeMnPhone(otpPhoneEl.value.trim());
+        if (!auth.currentUser) await signInAnonymously(auth).catch(() => {});
 
-      // Давхардлын шалгалт
-      const ref = doc(db, "phone_regs", phone);
-      const snap = await getDoc(ref).catch(() => null);
-      if (snap && snap.exists()) {
-        await updateRegHeartbeat(phone, pos);
+        // Байршил авах (permission аль хэдийн байгаа)
+        let pos;
+        try {
+          pos = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 });
+          dbg("Gate position:", fmtLoc(pos));
+        } catch (e) {
+          otpError.textContent =
+            e?.code === 1
+              ? "Байршлын зөвшөөрөл хэрэгтэй байна."
+              : "Байршил олдсонгүй.";
+          setTimeout(() => {
+            otpError.textContent = "";
+          }, 3500);
+          return;
+        }
 
-        const chkOld = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
+        // Давхардлын шалгалт
+        const ref = doc(db, "phone_regs", phone);
+        const snap = await getDoc(ref).catch(() => null);
+        if (snap && snap.exists()) {
+          await updateRegHeartbeat(phone, pos);
+
+          const chkOld = await isWithinQrLocation(
+            pos,
+            QR_LOC_ID,
+            DEFAULT_LOC_RADIUS_M
+          );
+          await logScan({
+            phone,
+            loc: QR_LOC_ID,
+            pos,
+            ua: navigator.userAgent,
+            decision: {
+              ok: chkOld.ok,
+              dist: Math.round(chkOld.dist || 0),
+              radius: chkOld.radius,
+              buffer: Math.round(chkOld.buffer || 0),
+              reason: chkOld.reason,
+            },
+          });
+
+          otpGate.hidden = true;
+          otpPhoneEl.value = "";
+          // Интро аль хэдийн дууссан тул одоо меню-г харуулна
+          showMenuOverlay();
+          return;
+        }
+
+        // ШИНЭ бүртгэл
+        try {
+          await setDoc(
+            ref,
+            {
+              phone,
+              uid: auth.currentUser?.uid || null,
+              source: "webar",
+              createdAt: serverTimestamp(),
+              lastSeenAt: serverTimestamp(),
+              ua: navigator.userAgent.slice(0, 1000),
+              lat: Number(pos.coords.latitude),
+              lng: Number(pos.coords.longitude),
+              accuracy: Number(pos.coords.accuracy ?? 0),
+              qrId: QR_LOC_ID || null,
+              lastQrId: QR_LOC_ID || null,
+            },
+            { merge: false }
+          );
+          REG_INFO = { phone, docId: phone };
+          await bindDeviceToPhone(phone);
+        } catch (e) {
+          console.error("setDoc failed:", e);
+          otpError.textContent =
+            e?.code === "permission-denied"
+              ? "Бүртгэх эрх байхгүй байна (rules-аа шалгана уу)."
+              : e?.message || "Бүртгэл амжилтгүй";
+          setTimeout(() => {
+            otpError.textContent = "";
+          }, 3500);
+          return;
+        }
+
+        // Лог
+        const chk = await isWithinQrLocation(
+          pos,
+          QR_LOC_ID,
+          DEFAULT_LOC_RADIUS_M
+        );
+        dbg("Gate decision:", chk);
         await logScan({
-          phone, loc: QR_LOC_ID, pos, ua: navigator.userAgent,
-          decision: { ok: chkOld.ok, dist: Math.round(chkOld.dist || 0), radius: chkOld.radius, buffer: Math.round(chkOld.buffer || 0), reason: chkOld.reason },
+          phone,
+          loc: QR_LOC_ID,
+          pos,
+          ua: navigator.userAgent,
+          decision: {
+            ok: chk.ok,
+            dist: Math.round(chk.dist || 0),
+            radius: chk.radius,
+            buffer: Math.round(chk.buffer || 0),
+            reason: chk.reason,
+          },
         });
 
         otpGate.hidden = true;
         otpPhoneEl.value = "";
-        // Интро аль хэдийн дууссан тул одоо меню-г харуулна
+        // Бүртгэл амжилттай → меню рүү
         showMenuOverlay();
-        return;
-      }
-
-      // ШИНЭ бүртгэл
-      try {
-        await setDoc(
-          ref,
-          {
-            phone, uid: auth.currentUser?.uid || null, source: "webar",
-            createdAt: serverTimestamp(), lastSeenAt: serverTimestamp(),
-            ua: navigator.userAgent.slice(0, 1000),
-            lat: Number(pos.coords.latitude), lng: Number(pos.coords.longitude),
-            accuracy: Number(pos.coords.accuracy ?? 0),
-            qrId: QR_LOC_ID || null, lastQrId: QR_LOC_ID || null,
-          },
-          { merge: false }
-        );
-        REG_INFO = { phone, docId: phone };
-        await bindDeviceToPhone(phone);
       } catch (e) {
-        console.error("setDoc failed:", e);
-        otpError.textContent =
-          e?.code === "permission-denied" ? "Бүртгэх эрх байхгүй байна (rules-аа шалгана уу)." : e?.message || "Бүртгэл амжилтгүй";
-        setTimeout(() => { otpError.textContent = ""; }, 3500);
-        return;
+        console.error(e);
+        otpError.textContent = e?.message || "Бүртгэл амжилтгүй";
+        setTimeout(() => {
+          otpError.textContent = "";
+        }, 3500);
+      } finally {
+        gateBusy = false;
+        btnSendCode.disabled = false;
       }
-
-      // Лог
-      const chk = await isWithinQrLocation(pos, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
-      dbg("Gate decision:", chk);
-      await logScan({
-        phone, loc: QR_LOC_ID, pos, ua: navigator.userAgent,
-        decision: { ok: chk.ok, dist: Math.round(chk.dist || 0), radius: chk.radius, buffer: Math.round(chk.buffer || 0), reason: chk.reason },
-      });
-
-      otpGate.hidden = true;
-      otpPhoneEl.value = "";
-      // Бүртгэл амжилттай → меню рүү
-      showMenuOverlay();
-    } catch (e) {
-      console.error(e);
-      otpError.textContent = e?.message || "Бүртгэл амжилтгүй";
-      setTimeout(() => { otpError.textContent = ""; }, 3500);
-    } finally {
-      gateBusy = false;
-      btnSendCode.disabled = false;
-    }
-  }, { passive: true });
+    },
+    { passive: true }
+  );
 }
 
 /* ===== Init: gate/intro boot ===== */
@@ -850,7 +1260,13 @@ async function initGateOrAutoEnter() {
   if (reg) REG_INFO = reg;
 
   // Лог — зөвшөөрөлгүй тул gps=null
-  await logScan({ phone: reg?.phone || null, loc: QR_LOC_ID, pos: null, ua: navigator.userAgent, decision: null });
+  await logScan({
+    phone: reg?.phone || null,
+    loc: QR_LOC_ID,
+    pos: null,
+    ua: navigator.userAgent,
+    decision: null,
+  });
 }
 
 /* ===== main ===== */
@@ -868,15 +1284,19 @@ tapLay.addEventListener("pointerdown", async () => {
     try {
       await ensurePermissionsGate();
       dbg("Permission gate OK");
-    } catch(e){
-      dbg("Permission gate failed:", e?.message||e);
+    } catch (e) {
+      dbg("Permission gate failed:", e?.message || e);
       alert(e?.message || "Зөвшөөрөл амжилтгүй.");
       tapLay.style.display = "flex";
       return;
     }
 
     // 2) Камераа асаана — AR бүрэн init болсны дараа
-    try { await ensureCameraOnce(); } catch (e) { dbg("camera on tap:", e?.message || e); }
+    try {
+      await ensureCameraOnce();
+    } catch (e) {
+      dbg("camera on tap:", e?.message || e);
+    }
 
     // 3) Интро шууд эхлүүлнэ
     if (!window.__introStarted) {
@@ -885,30 +1305,40 @@ tapLay.addEventListener("pointerdown", async () => {
     } else if (!introLoading && currentVideo) {
       await safePlay(currentVideo);
     }
-  } catch (e) { dbg("after tap failed:", e?.message || e); }
+  } catch (e) {
+    dbg("after tap failed:", e?.message || e);
+  }
 });
 
 /* ===== Меню товч ===== */
-document.getElementById("mExercise")?.addEventListener("click", startExerciseDirect);
+document
+  .getElementById("mExercise")
+  ?.addEventListener("click", startExerciseDirect);
 
 /* ===== Интро үед UI + frame safeguard ===== */
 onFrame(() => {
   if (currentVideo === vIntro) updateIntroButtons();
   const v = currentVideo;
   if (v && v.readyState >= 2) {
-    try { v.__threeVideoTex && (v.__threeVideoTex.needsUpdate = true); } catch {}
+    try {
+      v.__threeVideoTex && (v.__threeVideoTex.needsUpdate = true);
+    } catch {}
   }
 });
 
 /* ===== iOS autoplay/visibility хамгаалалт ===== */
 document.addEventListener("visibilitychange", async () => {
   if (document.visibilityState === "visible" && currentVideo) {
-    try { await safePlay(currentVideo); } catch {}
+    try {
+      await safePlay(currentVideo);
+    } catch {}
   }
 });
 window.addEventListener("pageshow", async () => {
   if (currentVideo && currentVideo.paused) {
-    try { await safePlay(currentVideo); } catch {}
+    try {
+      await safePlay(currentVideo);
+    } catch {}
   }
 });
 
@@ -927,7 +1357,9 @@ function hidePlane() {
 async function revealPlaneWhenReady(v) {
   try {
     await waitReady(v, 2);
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await new Promise((r) =>
+      requestAnimationFrame(() => requestAnimationFrame(r))
+    );
   } catch {}
   import("./ar.js").then(({ plane }) => {
     if (!plane) return;
@@ -949,8 +1381,12 @@ async function startIntroFlow(fromTap = false) {
     wireVideoDebug(vIntro, "intro");
     bindIntroButtons(vIntro);
 
-    try { await ensureCameraOnce(); }
-    catch (e) { dbg("camera start failed:", e?.message || e); return; }
+    try {
+      await ensureCameraOnce();
+    } catch (e) {
+      dbg("camera start failed:", e?.message || e);
+      return;
+    }
 
     const introDoc = await fetchLatestIntro();
     if (!introDoc) {
@@ -963,22 +1399,40 @@ async function startIntroFlow(fromTap = false) {
     dbg("Intro sources:", introSrc);
 
     // Exercise-ийг урьдчилан бэлдэх нь хэвээр
-    let exDoc = null, exSrc = null, posNow = null, chk = null;
+    let exDoc = null,
+      exSrc = null,
+      posNow = null,
+      chk = null;
     if (QR_LOC_ID) {
-      posNow = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 }).catch(() => null);
+      posNow = await getGeoOnce({
+        enableHighAccuracy: true,
+        timeout: 12000,
+      }).catch(() => null);
       if (posNow) dbg("IntroFlow pos:", fmtLoc(posNow));
       chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
       dbg("IntroFlow within?", chk);
       if (chk.ok) {
         exDoc = await fetchLatestExerciseFor(QR_LOC_ID);
-        if (exDoc) { exSrc = pickSourcesFromDoc(exDoc); dbg("Exercise sources:", exSrc); }
+        if (exDoc) {
+          exSrc = pickSourcesFromDoc(exDoc);
+          dbg("Exercise sources:", exSrc);
+        }
       }
     }
 
-    const introKind = await setSourcesAwait(vIntro, introSrc.webm, introSrc.mp4, introSrc.mp4_sbs);
+    const introKind = await setSourcesAwait(
+      vIntro,
+      introSrc.webm,
+      introSrc.mp4,
+      introSrc.mp4_sbs
+    );
     if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, exSrc.mp4_sbs);
 
-    if (vIntro.readyState < 1) { await new Promise((r) => vIntro.addEventListener("loadedmetadata", r, { once: true })); }
+    if (vIntro.readyState < 1) {
+      await new Promise((r) =>
+        vIntro.addEventListener("loadedmetadata", r, { once: true })
+      );
+    }
     const texIntro = videoTexture(vIntro);
     texIntro.needsUpdate = true;
     vIntro.__threeVideoTex = texIntro;
@@ -996,16 +1450,29 @@ async function startIntroFlow(fromTap = false) {
     } else if (useIntroKind === "sbs") {
       planeUseShader(texIntro);
     } else {
-      planeUseChroma(texIntro, { keyColor: 0x00ff00, similarity: 0.32, smoothness: 0.08, spill: 0.18 });
+      planeUseChroma(texIntro, {
+        keyColor: 0x00ff00,
+        similarity: 0.32,
+        smoothness: 0.08,
+        spill: 0.18,
+      });
     }
 
     fitPlaneToVideo(vIntro);
 
     currentVideo = vIntro;
 
-    try { vIntro.muted = false; await safePlay(vIntro); btnUnmute.style.display = "none"; } catch {}
+    try {
+      vIntro.muted = false;
+      await safePlay(vIntro);
+      btnUnmute.style.display = "none";
+    } catch {}
     if (vIntro.paused) {
-      try { vIntro.muted = true; await safePlay(vIntro); btnUnmute.style.display = "inline-block"; } catch {}
+      try {
+        vIntro.muted = true;
+        await safePlay(vIntro);
+        btnUnmute.style.display = "inline-block";
+      } catch {}
     }
 
     applyScale();
@@ -1015,22 +1482,33 @@ async function startIntroFlow(fromTap = false) {
 
     try {
       startGeoWatch((pos, err) => {
-        if (err) { dbg("GPS watch error:", err?.message || err); return; }
+        if (err) {
+          dbg("GPS watch error:", err?.message || err);
+          return;
+        }
         dbg("Watch", fmtLoc(pos));
       });
-    } catch (e) { dbg("GPS watch failed:", e?.message || e); }
+    } catch (e) {
+      dbg("GPS watch failed:", e?.message || e);
+    }
 
     vIntro.onended = async () => {
-      try { ["ibExercise", "ibGrowth", "ibKnowledge"].forEach((id) => document.getElementById(id)?.classList.add("mini")); } catch {}
+      try {
+        ["ibExercise", "ibGrowth", "ibKnowledge"].forEach((id) =>
+          document.getElementById(id)?.classList.add("mini")
+        );
+      } catch {}
       await afterIntroGate();
     };
-  } finally { introLoading = false; }
+  } finally {
+    introLoading = false;
+  }
 }
 
 /** Интро дууссаны дараах логик: бүртгэлтэй бол меню, үгүй бол gate */
 async function afterIntroGate() {
   stopGeoWatch();
-  const reg = REG_INFO || await getRegistrationByDeviceKey();
+  const reg = REG_INFO || (await getRegistrationByDeviceKey());
   hideBackButton();
   if (reg) {
     REG_INFO = reg;
@@ -1051,27 +1529,57 @@ async function startExerciseDirect() {
     stopIntroButtons();
     stopGeoWatch();
 
-    try { await ensureCameraOnce(); } catch (e) { dbg("camera start failed:", e?.message || e); return; }
+    try {
+      await ensureCameraOnce();
+    } catch (e) {
+      dbg("camera start failed:", e?.message || e);
+      return;
+    }
 
-    try { currentVideo?.pause?.(); } catch {}
+    try {
+      currentVideo?.pause?.();
+    } catch {}
 
-    const posNow = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 }).catch(() => null);
+    const posNow = await getGeoOnce({
+      enableHighAccuracy: true,
+      timeout: 12000,
+    }).catch(() => null);
     if (posNow) dbg("Exercise pos:", fmtLoc(posNow));
-    const chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
+    const chk = await isWithinQrLocation(
+      posNow,
+      QR_LOC_ID,
+      DEFAULT_LOC_RADIUS_M
+    );
     dbg("Exercise within?", chk);
     if (!chk.ok) {
-      dbg(`Exercise locked: not within location. dist=${Math.round(chk?.dist || -1)} > allowed=${chk?.radius}+${Math.round(chk?.buffer || 0)}`);
+      dbg(
+        `Exercise locked: not within location. dist=${Math.round(
+          chk?.dist || -1
+        )} > allowed=${chk?.radius}+${Math.round(chk?.buffer || 0)}`
+      );
       return;
     }
 
     const exDoc = await fetchLatestExerciseFor(QR_LOC_ID);
-    if (!exDoc) { dbg("No exercise video for this location"); return; }
+    if (!exDoc) {
+      dbg("No exercise video for this location");
+      return;
+    }
     const exSrc = pickSourcesFromDoc(exDoc);
     dbg("Exercise sources:", exSrc);
 
-    const exKind = await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, exSrc.mp4_sbs);
+    const exKind = await setSourcesAwait(
+      vEx,
+      exSrc.webm,
+      exSrc.mp4,
+      exSrc.mp4_sbs
+    );
 
-    if (vEx.readyState < 1) { await new Promise((r) => vEx.addEventListener("loadedmetadata", r, { once: true })); }
+    if (vEx.readyState < 1) {
+      await new Promise((r) =>
+        vEx.addEventListener("loadedmetadata", r, { once: true })
+      );
+    }
     const texEx = videoTexture(vEx);
     texEx.needsUpdate = true;
     vEx.__threeVideoTex = texEx;
@@ -1085,8 +1593,15 @@ async function startExerciseDirect() {
     // Материал (SBS салаа нэмсэн)
     if (useExKind === "alpha") {
       planeUseMap(texEx);
+    } else if (useExKind === "sbs") {
+      planeUseShader(texEx); // <-- НЭМЭВ: SBS-alpha үед тусгай материал
     } else {
-      planeUseChroma(texEx, { keyColor: 0x00ff00, similarity: 0.32, smoothness: 0.08, spill: 0.18 });
+      planeUseChroma(texEx, {
+        keyColor: 0x00ff00,
+        similarity: 0.32,
+        smoothness: 0.08,
+        spill: 0.18,
+      });
     }
 
     fitPlaneToVideo(vEx);
@@ -1094,9 +1609,17 @@ async function startExerciseDirect() {
     vEx.currentTime = 0;
     currentVideo = vEx;
 
-    try { vEx.muted = false; await safePlay(vEx); btnUnmute.style.display = "none"; } catch {}
+    try {
+      vEx.muted = false;
+      await safePlay(vEx);
+      btnUnmute.style.display = "none";
+    } catch {}
     if (vEx.paused) {
-      try { vEx.muted = true; await safePlay(vEx); btnUnmute.style.display = "inline-block"; } catch {}
+      try {
+        vEx.muted = true;
+        await safePlay(vEx);
+        btnUnmute.style.display = "inline-block";
+      } catch {}
     }
 
     await revealPlaneWhenReady(vEx);
@@ -1104,7 +1627,9 @@ async function startExerciseDirect() {
     showBackButton();
 
     dbg("exercise playing (AR, no menu).");
-  } finally { exLoading = false; }
+  } finally {
+    exLoading = false;
+  }
 }
 
 /* ===== texture→material ===== */
@@ -1118,7 +1643,8 @@ function planeUseMap(tex) {
     plane.material.needsUpdate = true;
   });
 }
-function planeUseShader(tex) { // SBS-alpha үед
+function planeUseShader(tex) {
+  // SBS-alpha үед
   import("./ar.js").then(({ plane, makeSbsAlphaMaterial }) => {
     plane.material?.dispose?.();
     plane.material = makeSbsAlphaMaterial(tex);
