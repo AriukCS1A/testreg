@@ -76,6 +76,22 @@
       opacity:0 !important;
       pointer-events:none !important;
     }
+    .backBtn{
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 0px) + 12px);
+      right: calc(env(safe-area-inset-right, 0px) + 12px);
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 44px; height: 44px;
+      border: none; border-radius: 999px;
+      background: rgba(0,0,0,.55);
+      color: #fff; font-size: 18px; line-height: 1;
+      cursor: pointer; backdrop-filter: blur(6px);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .backBtn:active{ transform: scale(0.98); }
   </style>
 </head>
 <body>
@@ -86,6 +102,9 @@
   <!-- Tap-to-start -->
   <div id="tapToStart"><button class="btn">▶ Эхлүүлэх (дуу нээх)</button></div>
   <button id="btnUnmute" class="btn">🔊 Дууг асаах</button>
+    <!-- Back → Menu -->
+  <button id="btnBack" class="backBtn" aria-label="Back to menu" hidden>←</button>
+
 
   <!-- Intro buttons -->
   <div id="overlayIntroBtns">
@@ -113,7 +132,7 @@
   <!-- OTP Gate -->
   <div id="otpGate" hidden>
     <div class="otp-panel">
-      <h3 class="otp-title">баталгаажуулалт</h3>
+      <h3 class="otp-title">Баталгаажуулалт</h3>
       <p class="otp-sub">Утасны дугаараа оруулж 6 оронтой кодоор баталгаажуулна уу.</p>
       <div class="otp-field">
         <span>+976</span>
@@ -139,10 +158,10 @@
   <!-- ✅ Монгол Permission Overlay -->
   <div id="permOverlay" class="perm-overlay" aria-modal="true" role="dialog">
     <div class="perm-card">
-      <h2 class="perm-title">Бараг болчихлоо…</h2>
+      <h2 class="perm-title">Манай WEBAR-т тавтай морилно уу?</h2>
       <p class="perm-text">
-        Энэ нэмэгдсэн бодит байдлын (AR) туршлагыг үзүүлэхийн тулд таны төхөөрөмжийн
-        <strong>камер</strong> болон <strong>байршлын</strong> мэдрэгчид рүү нэвтрэх зөвшөөрөл хэрэгтэй.
+        Та эхлэхийн тулд төхөөрөмжийнхөө
+        <strong>камер</strong> болон <strong>байршлын</strong> зөвшөөрлийг зөвшөөрөх хэрэгтэй.
       </p>
       <div class="perm-actions">
         <button id="btnGrant" class="perm-btn primary">ЗӨВШӨӨРӨХ</button>
@@ -196,6 +215,8 @@
     // Хэрэглэгч дараа зөвшөөрөх бол зүгээр л хаана
   }, { passive:true });
 </script>
+
+
 
 </body>
 </html>

@@ -14,6 +14,9 @@ import {
   showMenuOverlay,
   closeMenu,
   stopIntroButtons,
+  showBackButton,
+  hideBackButton,
+  onBackButton,
 } from "./ui.js";
 
 const dbg = (...a) => (_dbg ? _dbg("[AR]", ...a) : console.log("[AR]", ...a));
@@ -115,6 +118,22 @@ const otpError = document.getElementById("otpError");
 let currentVideo = null;
 let introLoading = false;
 let exLoading = false;
+
+// ===== Back → Menu логик (шинэ) =====
+async function backToMenuFromExercise(){
+  try {
+    try { vEx?.pause?.(); } catch {}
+    hidePlane();        // дүрсийг түр нууж цагаан анивчлалас сэргийлнэ
+    currentVideo = null;
+    showMenuOverlay();  // менюг буцааж харуулна (ui.js дотор Back товчийг автоматаар нуух тохируулгатай)
+  } finally {
+    hideBackButton();   // давхар баталгаажуулж нууж байна
+  }
+}
+
+// Нэг л удаа click handler холбох
+onBackButton(backToMenuFromExercise);
+
 
 /* ===== Firebase ===== */
 const fbApp = initializeApp(firebaseConfig);
@@ -926,6 +945,7 @@ async function startIntroFlow(fromTap = false) {
   if (introLoading) return;
   introLoading = true;
   try {
+    hideBackButton();
     wireVideoDebug(vIntro, "intro");
     bindIntroButtons(vIntro);
 
@@ -1011,6 +1031,7 @@ async function startIntroFlow(fromTap = false) {
 async function afterIntroGate() {
   stopGeoWatch();
   const reg = REG_INFO || await getRegistrationByDeviceKey();
+  hideBackButton();
   if (reg) {
     REG_INFO = reg;
     showMenuOverlay();
@@ -1081,6 +1102,8 @@ async function startExerciseDirect() {
     }
 
     await revealPlaneWhenReady(vEx);
+
+    showBackButton();
 
     dbg("exercise playing (AR, no menu).");
   } finally { exLoading = false; }

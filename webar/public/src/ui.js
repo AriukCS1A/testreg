@@ -14,33 +14,82 @@ export function bindIntroButtons(videoEl){
   vIntro = videoEl;
   showIntroBtns = true;
 }
-export function stopIntroButtons(){ showIntroBtns=false; ["ex","gr","kn"].forEach(id=>introBtnEls[id].classList.remove("show","mini")); }
+export function stopIntroButtons(){
+  showIntroBtns = false;
+  ["ex","gr","kn"].forEach(id => introBtnEls[id].classList.remove("show","mini"));
+}
 
 export function updateIntroButtons(){
   if (!showIntroBtns || !vIntro) return;
   const t = vIntro.currentTime || 0;
-  if (Math.abs(t-lastUIT) < 0.033) return;
+  if (Math.abs(t - lastUIT) < 0.033) return;
   lastUIT = t;
 
   const segOf = id => {
-    const f=BTN_TIMELINE.filter(s=>s.id===id && t>=s.t[0] && t<s.t[1]);
-    return f.length?f[f.length-1]:null;
+    const f = BTN_TIMELINE.filter(s => s.id === id && t >= s.t[0] && t < s.t[1]);
+    return f.length ? f[f.length - 1] : null;
   };
+
   const proc = (key, el) => {
     const seg = segOf(key);
     const st = introBtnState[key];
-    if (seg && seg.show){ st.shown=true; st.u=seg.u; st.v=seg.v; }
-    if (st.shown && st.u!=null && st.v!=null){
+    if (seg && seg.show){ st.shown = true; st.u = seg.u; st.v = seg.v; }
+    if (st.shown && st.u != null && st.v != null){
       const scr = worldToScreen(localPointOnPlane(st.u, st.v));
-      if (seg){ el.style.left = scr.x+"px"; el.style.top = scr.y+"px"; el.classList.remove("mini"); }
-      else { const off = BTN_OFFSETS_LOCKED[key]||{dx:0,dy:0}; el.style.left=(scr.x+off.dx)+"px"; el.style.top=(scr.y+off.dy)+"px"; el.classList.add("mini"); }
+      if (seg){
+        el.style.left = scr.x + "px";
+        el.style.top  = scr.y + "px";
+        el.classList.remove("mini");
+      } else {
+        const off = BTN_OFFSETS_LOCKED[key] || { dx:0, dy:0 };
+        el.style.left = (scr.x + off.dx) + "px";
+        el.style.top  = (scr.y + off.dy) + "px";
+        el.classList.add("mini");
+      }
       el.classList.add("show");
-    } else el.classList.remove("show","mini");
+    } else {
+      el.classList.remove("show","mini");
+    }
   };
-  proc("ex", introBtnEls.ex); proc("gr", introBtnEls.gr); proc("kn", introBtnEls.kn);
+
+  proc("ex", introBtnEls.ex);
+  proc("gr", introBtnEls.gr);
+  proc("kn", introBtnEls.kn);
 }
 
-// Меню
+// ===================== Меню =====================
 const menu = document.getElementById("menu");
-export function showMenuOverlay(){ menu.style.display="flex"; menu.style.opacity="1"; menu.style.pointerEvents="auto"; }
-export function closeMenu(){ menu.style.display="none"; }
+export function showMenuOverlay(){
+  menu.style.display = "flex";
+  menu.style.opacity = "1";
+  menu.style.pointerEvents = "auto";
+  // Меню дээр байхад Back товч хэрэггүй тул нууж өгнө
+  hideBackButton();
+}
+export function closeMenu(){ menu.style.display = "none"; }
+
+// ===================== Back товч (шинэ) =====================
+const backBtn = document.getElementById("btnBack");
+
+/** Exercise тоглож байх үед Back товчийг харуулах */
+export function showBackButton(){
+  if (backBtn) backBtn.hidden = false;
+}
+
+/** Меню/интро/гейт үед Back товчийг нуух */
+export function hideBackButton(){
+  if (backBtn) backBtn.hidden = true;
+}
+
+/**
+ * Back товчны click эвентэд callback холбох (давхардахаас сэргийлнэ)
+ * @param {(ev?:Event)=>void} cb
+ */
+export function onBackButton(cb){
+  if (!backBtn || backBtn.__wired) return;
+  backBtn.__wired = true;
+  backBtn.addEventListener("click", (e) => {
+    e?.preventDefault?.();
+    cb?.(e);
+  }, { passive: true });
+}
