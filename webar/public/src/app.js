@@ -632,20 +632,16 @@ async function fetchLatestIntro() {
   return null;
 }
 
-// REPLACE the whole function
+// FORMAT-priority by device: iOS=mp4 first, Android/Desktop=webm first
 async function fetchLatestExerciseFor(locationId) {
   if (!locationId) return null;
 
-  const base = [
-    ["webm"],        // 1) webm-г нэгдүгээрт
-    ["mp4_sbs"],     // 2) SBS (хэрэв тусад нь хадгалдаг бол)
-    ["mp4"],         // 3) жирийн mp4
-    [null],          // 4) формат үл харгалзан (сүүлчийн fallback)
-  ];
-
   const col = collection(db, "videos");
+  const fmtOrder = (isIOS === true)
+    ? ["mp4", "mp4_sbs", "webm", null]   // iOS → MP4 first
+    : ["webm", "mp4_sbs", "mp4", null];  // Android/Desktop → WEBM first
 
-  async function tryOnce(fmt) {
+  const tryByFormat = async (fmt) => {
     const parts = [
       where("active", "==", true),
       where("isGlobal", "==", false),
@@ -653,32 +649,22 @@ async function fetchLatestExerciseFor(locationId) {
     ];
     if (fmt) parts.push(where("format", "==", fmt));
 
-    // Хамгийн сүүлийнхийг авахыг оролдоё (индекс байхгүй байж магадгүй)
-    let q;
-    try {
-      // uploadedAt/createdAt талбар байгаа бол үүнийг ашиглана
-      const { orderBy } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
-      q = fsQuery(col, ...parts, orderBy("uploadedAt", "desc"), limit(1));
-    } catch {
-      // Хэрэв orderBy-д индекс шаардаад унавал энгийн query-р fallback
-      q = fsQuery(col, ...parts, limit(1));
-    }
-
+    // Тодорхой дараалал хэрэггүй тул orderBy алгасна (индекс шаардлага багасна)
+    const q = fsQuery(col, ...parts, limit(1));
     const snap = await getDocs(q);
     if (snap.empty) return null;
-    return { id: snap.docs[0].id, ...snap.docs[0].data() };
-  }
+    const d = { id: snap.docs[0].id, ...snap.docs[0].data() };
+    dbg("Exercise doc:", d.id, "format=", d.format, "url=", (d.url || "").slice(-32));
+    return d;
+  };
 
-  // дарааллаар нь туршина
-  for (const [fmt] of base) {
-    const d = await tryOnce(fmt);
-    if (d) {
-      dbg("Exercise doc:", d.id, "format=", d.format, "url=", (d.url || "").slice(-32));
-      return d;
-    }
+  for (const fmt of fmtOrder) {
+    const d = await tryByFormat(fmt);
+    if (d) return d;
   }
   return null;
 }
+
 
 
 async function logScan({ phone, loc, pos, ua, decision }) {
