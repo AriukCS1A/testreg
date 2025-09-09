@@ -899,38 +899,24 @@ function wireVideoDebug(v, tag) {
 }
 
 /* ===== Firestore queries ===== */
+/* ===== Firestore queries ===== */
 async function fetchLatestIntro() {
-  const qs = [
-    fsQuery(
-      collection(db, "videos"),
-      where("active", "==", true),
-      where("isGlobal", "==", true),
-      limit(1)
-    ),
-    fsQuery(
-      collection(db, "videos"),
-      where("active", "==", true),
-      where("name", "==", "intro"),
-      limit(1)
-    ),
-  ];
-  for (const q of qs) {
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      const d = { id: snap.docs[0].id, ...snap.docs[0].data() };
-      dbg(
-        "Intro doc:",
-        d.id,
-        "format=",
-        d.format,
-        "url=",
-        (d.url || "").slice(-32)
-      );
-      return d;
-    }
-  }
-  return null;
+  const q = fsQuery(
+    collection(db, "videos"),
+    where("active", "==", true),
+    where("isGlobal", "==", true),
+    orderBy("uploadedAt", "desc"),
+    limit(1)
+  );
+
+  const snap = await getDocs(q);
+  if (snap.empty) return null;
+
+  const d = { id: snap.docs[0].id, ...snap.docs[0].data() };
+  dbg("Intro doc:", d.id, "format=", d.format, "url=", (d.url || "").slice(-32));
+  return d;
 }
+
 
 /* === ШИНЭ: тухайн локацид формат тус бүрийн хамгийн сүүлийг авах === */
 async function latestExerciseByFormatAtLoc(fmt, locId) {
