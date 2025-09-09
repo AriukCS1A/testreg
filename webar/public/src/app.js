@@ -656,13 +656,7 @@ function cleanUrl(u = "") {
       .replace(/^['"]+|['"]+$/g, "") || null
   );
 }
-function normFormat(x = "") {
-  const s = String(x).toLowerCase();
-  if (s.includes("webm")) return "webm";
-  if (s.includes("mp4_sbs") || /sbs/.test(s)) return "mp4_sbs";
-  if (s.includes("mp4")) return "mp4";
-  return s;
-}
+
 // --- replace your extFromUrl + pickSourcesFromDoc with this ---
 
 function extFromUrl(u = "") {
