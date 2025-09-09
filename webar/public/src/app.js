@@ -632,21 +632,54 @@ async function fetchLatestIntro() {
   return null;
 }
 
+// REPLACE the whole function
 async function fetchLatestExerciseFor(locationId) {
   if (!locationId) return null;
-  const q = fsQuery(
-    collection(db, "videos"),
-    where("active", "==", true),
-    where("isGlobal", "==", false),
-    where("locationIds", "array-contains", locationId),
-    limit(1)
-  );
-  const snap = await getDocs(q);
-  if (snap.empty) return null;
-  const d = { id: snap.docs[0].id, ...snap.docs[0].data() };
-  dbg("Exercise doc:", d.id, "format=", d.format, "url=", (d.url || "").slice(-32));
-  return d;
+
+  const base = [
+    ["webm"],        // 1) webm-г нэгдүгээрт
+    ["mp4_sbs"],     // 2) SBS (хэрэв тусад нь хадгалдаг бол)
+    ["mp4"],         // 3) жирийн mp4
+    [null],          // 4) формат үл харгалзан (сүүлчийн fallback)
+  ];
+
+  const col = collection(db, "videos");
+
+  async function tryOnce(fmt) {
+    const parts = [
+      where("active", "==", true),
+      where("isGlobal", "==", false),
+      where("locationIds", "array-contains", locationId),
+    ];
+    if (fmt) parts.push(where("format", "==", fmt));
+
+    // Хамгийн сүүлийнхийг авахыг оролдоё (индекс байхгүй байж магадгүй)
+    let q;
+    try {
+      // uploadedAt/createdAt талбар байгаа бол үүнийг ашиглана
+      const { orderBy } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+      q = fsQuery(col, ...parts, orderBy("uploadedAt", "desc"), limit(1));
+    } catch {
+      // Хэрэв orderBy-д индекс шаардаад унавал энгийн query-р fallback
+      q = fsQuery(col, ...parts, limit(1));
+    }
+
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+    return { id: snap.docs[0].id, ...snap.docs[0].data() };
+  }
+
+  // дарааллаар нь туршина
+  for (const [fmt] of base) {
+    const d = await tryOnce(fmt);
+    if (d) {
+      dbg("Exercise doc:", d.id, "format=", d.format, "url=", (d.url || "").slice(-32));
+      return d;
+    }
+  }
+  return null;
 }
+
 
 async function logScan({ phone, loc, pos, ua, decision }) {
   const uid = auth.currentUser?.uid || null;
