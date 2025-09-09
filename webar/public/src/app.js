@@ -1085,8 +1085,6 @@ async function startExerciseDirect() {
     // Материал (SBS салаа нэмсэн)
     if (useExKind === "alpha") {
       planeUseMap(texEx);
-    } else if (useExKind === "sbs") {
-      planeUseShader(texEx);
     } else {
       planeUseChroma(texEx, { keyColor: 0x00ff00, similarity: 0.32, smoothness: 0.08, spill: 0.18 });
     }
