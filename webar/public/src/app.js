@@ -118,6 +118,7 @@ const otpError = document.getElementById("otpError");
 let currentVideo = null;
 let introLoading = false;
 let exLoading = false;
+let LAST_POS = null;
 
 // ===== Back → Menu логик (шинэ) =====
 async function backToMenuFromExercise(){
@@ -326,6 +327,16 @@ async function ensurePermissionsGate() {
       camP.catch(e => { throw e; }),
       geoP.catch(e => { throw e; }),
     ]);
+     LAST_POS = pos;
+
+    // 2) Хэрэв энэхүү төхөөрөмж өмнө нь бүртгэлтэй бол — шууд heartbeat
+    if (REG_INFO?.phone) {
+      try {
+        await updateRegHeartbeat(REG_INFO.phone, pos);
+      } catch (err) {
+        dbg("updateRegHeartbeat failed:", err?.code || err?.message || err);
+      }
+    }
     return pos;
   } catch (e) {
     if (e?.code === 1) throw new Error("Байршлын зөвшөөрөл хэрэгтэй. Settings → Safari → Location → While Using the App болгож, дахин оролдоно уу.");
@@ -1068,6 +1079,12 @@ async function afterIntroGate() {
   hideBackButton();
   if (reg) {
     REG_INFO = reg;
+    // Байршил cache байвал дарна, эсвэл түргэн GPS авч дарна
+    try {
+      const pos = LAST_POS || await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 });
+      LAST_POS = pos;
+      await updateRegHeartbeat(REG_INFO.phone, pos);
+    } catch (_) {}
     showMenuOverlay();
     dbg("intro ended → already registered → menu shown");
   } else {
@@ -1075,6 +1092,7 @@ async function afterIntroGate() {
     dbg("intro ended → show phone gate (registration begins)");
   }
 }
+
 
 async function startExerciseDirect() {
   if (exLoading) return;
@@ -1089,8 +1107,23 @@ async function startExerciseDirect() {
 
     try { currentVideo?.pause?.(); } catch {}
 
+    // --- GPS авч, шууд heartbeat хийнэ ------------------------------------
     const posNow = await getGeoOnce({ enableHighAccuracy: true, timeout: 12000 }).catch(() => null);
-    if (posNow) dbg("Exercise pos:", fmtLoc(posNow));
+    if (posNow) {
+      dbg("Exercise pos:", fmtLoc(posNow));
+      // ★ Cache-лэнэ
+      LAST_POS = posNow;
+      // ★ Төхөөрөмж өмнө нь бүртгэлтэй бол phone_regs шинэчилнэ
+      if (REG_INFO?.phone) {
+        try {
+          await updateRegHeartbeat(REG_INFO.phone, posNow);
+        } catch (err) {
+          dbg("updateRegHeartbeat failed:", err?.code || err?.message || err);
+        }
+      }
+    }
+    // ---------------------------------------------------------------------
+
     const chk = await isWithinQrLocation(posNow, QR_LOC_ID, DEFAULT_LOC_RADIUS_M);
     dbg("Exercise within?", chk);
     if (!chk.ok) {
@@ -1140,6 +1173,7 @@ async function startExerciseDirect() {
     dbg("exercise playing (AR, no menu).");
   } finally { exLoading = false; }
 }
+
 
 /* ===== texture→material ===== */
 function planeUseMap(tex) {
