@@ -723,19 +723,27 @@ async function logScan({ phone, loc, pos, ua, decision }) {
 async function updateRegHeartbeat(phone, pos) {
   if (!phone) return;
   try {
-    await setDoc(
-      doc(db, "phone_regs", phone),
-      {
-        lastSeenAt: serverTimestamp(),
-        lastQrId: QR_LOC_ID || null,
-        lat: Number(pos?.coords?.latitude ?? null),
-        lng: Number(pos?.coords?.longitude ?? null),
-        accuracy: Number(pos?.coords?.accuracy ?? 0),
-      },
-      { merge: true }
-    );
-  } catch (e) { dbg("updateRegHeartbeat failed:", e?.code || e?.message || e); }
+    const patch = {
+      lastSeenAt: serverTimestamp(),
+      lastQrId: QR_LOC_ID || null,
+      lat: Number(pos?.coords?.latitude ?? null),
+      lng: Number(pos?.coords?.longitude ?? null),
+      accuracy: Number(pos?.coords?.accuracy ?? 0),
+    };
+
+    // ★ device key hash-аа хамт илгээж rules-ийг давна
+    const devHash = await getLocalDeviceHashHex();
+    if (devHash) patch.deviceKeyHashes = arrayUnion(devHash);
+
+    // ★ заавал signed-in байх
+    if (!auth.currentUser) await signInAnonymously(auth).catch(()=>{});
+
+    await setDoc(doc(db, "phone_regs", phone), patch, { merge: true });
+  } catch (e) {
+    dbg("updateRegHeartbeat failed:", e?.code || e?.message || e);
+  }
 }
+
 
 /* ---- DeviceKey (uid-с ангид) ---- */
 async function makeDeviceKeyBytes() { const b = new Uint8Array(32); crypto.getRandomValues(b); return b; }
@@ -752,6 +760,14 @@ async function sha256Hex(bytes) {
   return Array.from(arr).map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 const LS_KEY = "webar_reg_key";
+
+async function getLocalDeviceHashHex() {
+  try {
+    const devB64 = localStorage.getItem(LS_KEY);
+    if (!devB64) return null;
+    return await sha256Hex(fromB64(devB64)); // sha256Hex, fromB64 таньд бий
+  } catch { return null; }
+}
 
 /** Анхны бүртгэлийн дараа төхөөрөмжийг phone-той холбоно */
 async function bindDeviceToPhone(phone) {
