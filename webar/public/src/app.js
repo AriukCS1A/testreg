@@ -1387,6 +1387,8 @@ makeVideoDecodeFriendly(vIntro);
 makeVideoDecodeFriendly(vEx);
 await initGateOrAutoEnter();
 
+try { hideBackButton(); } catch (_) {}
+
 /* ===== Эхний tap: permission → camera → intro ===== */
 tapLay.addEventListener("pointerdown", async () => {
   tapLay.style.display = "none";
