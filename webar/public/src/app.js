@@ -701,6 +701,7 @@ function cleanUrl(u = "") {
 function normFormat(x = "") {
   const s = String(x).toLowerCase();
   if (s.includes("webm")) return "webm";
+  if (s.includes("mov") || s.includes("quicktime")) return "mov";
   if (s.includes("mp4_sbs") || /sbs/.test(s)) return "mp4_sbs";
   if (s.includes("mp4")) return "mp4";
   return s;
@@ -717,7 +718,7 @@ function extFromUrl(u = "") {
 
 // Firestore doc: { url, format }
 function pickSourcesFromDoc(doc) {
-  const out = { webm: null, mp4_sbs: null, mp4: null };
+  const out = { webm: null, mp4_sbs: null, mp4: null, mov:null };
   const url = cleanUrl(doc?.url);
   if (!url) return out;
 
@@ -728,12 +729,14 @@ function pickSourcesFromDoc(doc) {
   if (ext === "webm") out.webm = url;
   else if (ext === "mp4" || ext === "mov") {
     if (hasSbsTag) out.mp4_sbs = url;
+    else if (ext === "mov") out.mov = url;
     else out.mp4 = url;
   }
 
-  if (!out.webm && !out.mp4_sbs && !out.mp4) {
+  if (!out.webm && !out.mp4_sbs && !out.mp4 && !out.mov) {
     const fmt = normFormat(doc?.format || "");
     if (fmt === "webm") out.webm = url;
+    else if (fmt === "mov") out.mov = url;
     else if (fmt === "mp4_sbs") out.mp4_sbs = url;
     else if (fmt === "mp4") out.mp4 = url;
   }
@@ -756,7 +759,7 @@ function withSeekHack(u) {
 }
 
 /* Candidates for device (UPDATED) */
-function pickBestForDevice({ webm, mp4_sbs, mp4 }) {
+function pickBestForDevice({ webm, mp4_sbs, mp4, mov }) {
   const isiOSDevice = isIOS === true;
   const list = [];
   const push = (url, kind, type = null) => {
@@ -764,7 +767,8 @@ function pickBestForDevice({ webm, mp4_sbs, mp4 }) {
   };
 
   if (isiOSDevice) {
-    // iOS: WEBM битгий оролд — шууд MP4-уудыг туршиж үзнэ
+    push(mov, "alpha", 'video/mp4; codecs="hvc1"');
+    push(mov, "alpha", "video/quicktime");
     push(mp4_sbs, "sbs", "video/mp4");
     push(mp4, "flat", "video/mp4");
   } else {
@@ -777,7 +781,7 @@ function pickBestForDevice({ webm, mp4_sbs, mp4 }) {
 }
 
 /* ===== Robust video loader ===== */
-async function setSourcesAwait(v, webm, mp4, mp4_sbs) {
+async function setSourcesAwait(v, webm, mp4, mp4_sbs, mov = null) {
   try {
     v.pause?.();
   } catch {}
@@ -795,7 +799,7 @@ async function setSourcesAwait(v, webm, mp4, mp4_sbs) {
 
   if (isIOS === true) webm = null; // iOS дээр webm унтраах
 
-  const base = pickBestForDevice({ webm, mp4_sbs, mp4 });
+  const base = pickBestForDevice({ webm, mp4_sbs, mp4, mov });
   if (!base.length) throw new Error("No playable sources for this device");
 
   const attempts = [];
@@ -954,7 +958,7 @@ async function fetchLatestIntro() {
   const col = collection(db, "videos");
   const fmtOrder =
     isIOS === true
-      ? ["mp4", "mp4_sbs", "webm", null] // iOS-д MP4-ээ түрүүнд
+      ? ["mov", "mp4", "mp4_sbs", "webm", null] // iOS-д MP4-ээ түрүүнд
       : ["webm", "mp4_sbs", "mp4", null]; // Android/Desktop-д WEBM-ээ түрүүнд
 
   const tryByFormat = async (fmt) => {
@@ -991,7 +995,7 @@ async function fetchLatestExerciseFor(locationId) {
   const col = collection(db, "videos");
   const fmtOrder =
     isIOS === true
-      ? ["mp4", "mp4_sbs", "webm", null] // iOS → MP4 first
+      ? ["mov","mp4", "mp4_sbs", "webm", null] // iOS → MP4 first
       : ["webm", "mp4_sbs", "mp4", null]; // Android/Desktop → WEBM first
 
   const tryByFormat = async (fmt) => {
@@ -1537,9 +1541,10 @@ async function startIntroFlow(fromTap = false) {
       vIntro,
       introSrc.webm,
       introSrc.mp4,
-      introSrc.mp4_sbs
+      introSrc.mp4_sbs,
+      introSrc.mov
     );
-    if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, exSrc.mp4_sbs);
+    if (exSrc) await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, exSrc.mp4_sbs, exSrc.mov);
 
     if (vIntro.readyState < 1) {
       await new Promise((r) =>
@@ -1716,7 +1721,7 @@ async function startExerciseDirect() {
     const exSrc = pickSourcesFromDoc(exDoc);
     dbg("Exercise sources:", exSrc);
 
-    const exKind = await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, exSrc.mp4_sbs);
+    const exKind = await setSourcesAwait(vEx, exSrc.webm, exSrc.mp4, exSrc.mp4_sbs, exSrc.mov);
 
     if (vEx.readyState < 1) {
       await new Promise((r) => vEx.addEventListener("loadedmetadata", r, { once: true }));
