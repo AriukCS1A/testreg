@@ -224,11 +224,13 @@
   <div id="otpGate" hidden>
     <div class="otp-panel">
       <h3 class="otp-title">Баталгаажуулалт</h3>
+      <p class="otp-sub">Утасны дугаараа оруулж 6 оронтой кодоор баталгаажуулна уу.</p>
       <div class="otp-field">
         <span>+976</span>
         <input id="otpPhone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="Утасны дугаар (8 цифр)"
           maxlength="8">
       </div>
+      <button id="btnSendCode" class="btn full">Код авах</button>
       <div id="otpCodeWrap" class="otp-code-wrap" hidden>
         <div class="otp-inputs" id="otpInputs"></div>
         <button id="btnVerifyCode" class="btn full">Баталгаажуулах</button>
@@ -237,7 +239,9 @@
         </div>
       </div>
       <div class="otp-error" id="otpError"></div>
-    
+      <div class="devtools"><span class="hint">Туршилтын код: <b>000000</b></span><button id="btnOtpReset"
+          class="btn ghost">Дахин турших</button></div>
+    </div>
   </div>
 
   <!-- Hidden videos -->
