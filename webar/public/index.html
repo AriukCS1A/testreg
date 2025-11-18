@@ -1,103 +1,314 @@
 <!doctype html>
 <html lang="mn">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
-  <title>Гар угаах видео</title>
+  <title>WebAR — Intro → Меню → Дасгал</title>
 
+  <!-- iOS/PWA найрсаг нэмэлтүүд -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="format-detection" content="telephone=no">
   <meta name="theme-color" content="#000000">
 
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+  <!-- Гол stylesheet -->
+  <link rel="stylesheet" href="./styles/main.css">
 
-    body {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      background: #050816;
-      color: #f5f7ff;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  <!-- ✅ Хуучин service worker-уудыг унтраана -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations?.().then(rs => rs.forEach(r => r.unregister()));
+    }
+  </script>
+
+  <!-- Vendor (CDN) -->
+  <script src="https://unpkg.com/three@0.152.2/build/three.min.js" defer></script>
+  <script src="https://unpkg.com/@zappar/zappar-threejs@2.5.2/umd/zappar-threejs.js" defer></script>
+
+  <!-- Vendor бэлэн болмогц -->
+  <script>
+    window.__depsReady = new Promise(res => addEventListener('load', () => {
+      res({ THREE: window.THREE, ZapparThree: window.ZapparThree });
+    }, { once: true }));
+  </script>
+
+  <!-- Permission Overlay CSS (монгол) -->
+  <style>
+    .perm-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 99999;
+      display: grid;
+      place-items: center;
+      background: rgba(0, 0, 0, .84);
+      backdrop-filter: blur(2px);
     }
 
-    .wrapper {
-      width: 100%;
-      max-width: 480px;
-      padding: 16px;
+    .perm-card {
+      width: min(92vw, 560px);
+      background: #0b0f14;
+      color: #e7eef7;
+      border: 1px solid rgba(255, 255, 255, .08);
+      border-radius: 16px;
+      padding: 28px 24px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
       text-align: center;
     }
 
-    h1 {
-      font-size: 20px;
-      margin-bottom: 10px;
+    .perm-title {
+      margin: 0 0 10px;
+      font-size: 24px;
+      font-weight: 800;
+    }
+
+    .perm-text {
+      margin: 0 0 18px;
+      line-height: 1.6;
+      color: #c9d6e2;
+    }
+
+    .perm-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin: 6px 0 10px;
+    }
+
+    .perm-btn {
+      appearance: none;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 15px;
       font-weight: 700;
+      cursor: pointer;
+      transition: transform .08s ease, box-shadow .2s ease, background .2s ease;
     }
 
-    p {
-      font-size: 14px;
-      margin-bottom: 12px;
-      opacity: .8;
+    .perm-btn.primary {
+      background: #2f6bff;
+      color: #fff;
+      box-shadow: 0 6px 16px rgba(47, 107, 255, .35);
     }
 
-    .video-frame {
-      position: relative;
-      width: 100%;
-      border-radius: 16px;
-      overflow: hidden;
-      background: #000;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, .6);
+    .perm-btn.primary:active {
+      transform: translateY(1px);
     }
 
-    video {
-      width: 100%;
-      height: 100%;
-      display: block;
-      background: #000;
+    .perm-btn.ghost {
+      background: transparent;
+      color: #e7eef7;
+      border-color: rgba(255, 255, 255, .18);
+      border: 1px solid rgba(255, 255, 255, .18);
     }
 
-    .note {
+    .perm-help {
       margin-top: 10px;
-      font-size: 12px;
-      opacity: .7;
+      color: #b9c7d6;
+      text-align: left;
+    }
+
+    .perm-help summary {
+      cursor: pointer;
+    }
+
+    .perm-help ol {
+      margin: 10px 0 0 18px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    /* 🚫 Zappar-ийн built-in permission/compatibility UI-г нуух */
+    .zappar-compatibility-ui,
+    .zappar-permission-request,
+    .zappar-permission-request-ui,
+    .zappar-ui,
+    .zappar__permission-request,
+    .zappar__compatibility {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+
+    .backBtn {
+      position: fixed;
+      /* ⬇️ iOS safe-area: ЗҮҮН ДЭЭД БУЛАН */
+      top: calc(env(safe-area-inset-top, 0px) + 12px);
+      left: calc(env(safe-area-inset-left, 0px) + 12px);
+      /* right/bottom хэрэггүй */
+      z-index: 99999;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 44px;
+      height: 44px;
+      border: none;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, .55);
+      color: #fff;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      backdrop-filter: blur(6px);
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .backBtn:active {
+      transform: scale(0.98);
+    }
+
+    /* hidden үед бүр таг нуух (HTML дээр hidden ашиглаж байгаа) */
+    #btnBack[hidden] {
+      display: none !important;
     }
   </style>
 </head>
+
 <body>
-  <div class="wrapper">
-    <h1>Гараа зөв угаах заавар</h1>
-    <p>Дараах видеог бүтэн үзэж, гар угаах алхмуудтай танилцаарай.</p>
+  <!-- ✔️ iOS дээрх явцыг харуулах статус мөр -->
+  <div id="debugStatus" style="position:fixed;left:16px;top:16px;color:#6cf;font:12px/1.4 monospace;z-index:9999"></div>
+  <div id="debug">DEBUG: boot…</div>
 
-    <div class="video-frame">
-      <!-- ⚠️ SRC-ийг өөрийн mp4 файлын замаар солино -->
-      <video
-        id="handwashVideo"
-        playsinline
-        webkit-playsinline
-        controls
-        preload="auto"
-        poster=""
-      >
-        <source src="гар угаах.mp4" type="video/mp4">
-        Танай браузер видео тоглуулахыг дэмжихгүй байна.
-      </video>
-    </div>
+  <!-- Tap-to-start -->
+  <div id="tapToStart"><button class="btn">▶ Эхлүүлэх (дуу нээх)</button></div>
+  <button id="btnUnmute" class="btn">🔊 Дууг асаах</button>
+  <!-- Back → Menu -->
+  <button id="btnBack" class="backBtn" aria-label="Back to menu" hidden>←</button>
 
-    <div class="note">Android, iOS төхөөрөмжүүдэд зориулсан MP4 видео.</div>
+
+  <!-- Intro buttons -->
+  <div id="overlayIntroBtns">
+    <div id="ibExercise" class="introbtn">🏃 ДАСГАЛ</div>
+    <div id="ibGrowth" class="introbtn">🌱 ХӨГЖИЛ</div>
+    <div id="ibKnowledge" class="introbtn">📘 ХИЧЭЭЛ</div>
   </div>
 
-  <script>
-    // Хүсвэл автоматаар muted autoplay хийх боломжтой (Safari бодлогоос хамаарна)
-    const video = document.getElementById('handwashVideo');
-    if (video) {
-      video.muted = true; // autoplay зөвшөөрөхийн тулд
-      video.play().catch(() => {
-        // Хэрвээ autoplay хоригдвол зүгээр л хэрэглэгч өөрөө play дарна
+  <!-- Меню -->
+  <div id="menu">
+    <div class="menu-panel">
+      <h2 class="menu-title">AR Меню</h2>
+      <p class="menu-sub">Туршлагаа сонгоно уу</p>
+      <div class="menu-grid">
+        <div class="card" id="mExercise">
+          <div class="icon">🏃</div>
+          <div>
+            <div class="ttl">Дасгал</div>
+            <div style="opacity:.8;font-size:12px">Шууд тоглуулах</div>
+          </div>
+        </div>
+        <div class="card" id="mGrowth">
+          <div class="icon">🌱</div>
+          <div>
+            <div class="ttl">Хувь хүний хөгжил</div>
+            <div style="opacity:.8;font-size:12px">Тун удахгүй</div>
+          </div>
+        </div>
+        <div class="card" id="mKnowledge">
+          <div class="icon">📘</div>
+          <div>
+            <div class="ttl">Хичээл</div>
+            <div style="opacity:.8;font-size:12px">Тун удахгүй</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OTP Gate -->
+  <div id="otpGate" hidden>
+    <div class="otp-panel">
+      <h3 class="otp-title">Баталгаажуулалт</h3>
+      <div class="otp-field">
+        <span>+976</span>
+        <input id="otpPhone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="Утасны дугаар (8 цифр)"
+          maxlength="8">
+      </div>
+      <div id="otpCodeWrap" class="otp-code-wrap" hidden>
+        <div class="otp-inputs" id="otpInputs"></div>
+        <button id="btnVerifyCode" class="btn full">Баталгаажуулах</button>
+        <div class="otp-meta"><span id="otpTimer">60</span> сек дараа дахин илгээх боломжтой.
+          <div><button id="btnResend" class="btn ghost" disabled>Дахин илгээх</button></div>
+        </div>
+      </div>
+      <div class="otp-error" id="otpError"></div>
+    
+  </div>
+
+  <!-- Hidden videos -->
+  <video id="vidIntro" playsinline webkit-playsinline autoplay muted preload="auto" crossorigin="anonymous"
+    hidden></video>
+  <video id="vidExercise" playsinline webkit-playsinline autoplay muted loop preload="auto" crossorigin="anonymous"
+    hidden></video>
+
+  <!-- ✅ Монгол Permission Overlay -->
+  <div id="permOverlay" class="perm-overlay" aria-modal="true" role="dialog">
+    <div class="perm-card">
+      <h2 class="perm-title">Манай WEBAR-т тавтай морилно уу?</h2>
+      <p class="perm-text">
+        Та эхлэхийн тулд төхөөрөмжийнхөө
+        <strong>камер</strong> болон <strong>байршлын</strong> зөвшөөрлийг зөвшөөрөх хэрэгтэй.
+      </p>
+      <div class="perm-actions">
+        <button id="btnGrant" class="perm-btn primary">ЗӨВШӨӨРӨХ</button>
+        <button id="btnLater" class="perm-btn ghost">Дараа асуу</button>
+      </div>
+      <details class="perm-help">
+        <summary>iPhone/iPad дээр зөвшөөрөх заавар</summary>
+        <ol>
+          <li>Settings → <b>Safari</b> → <b>Camera</b> → <b>Allow</b> (эсвэл <b>Ask</b>)</li>
+          <li>Settings → <b>Safari</b> → <b>Location</b> → <b>While Using the App</b></li>
+          <li>Дараа нь хуудсаа <b>Refresh</b> хийнэ.</li>
+        </ol>
+      </details>
+    </div>
+  </div>
+
+  <!-- Танай модулиуд -->
+  <script type="module" src="./src/app.js"></script>
+
+  <!-- Overlay-г app.js-тэй холбох -->
+  <script type="module">
+    const overlay = document.getElementById('permOverlay');
+    const grantBtn = document.getElementById('btnGrant');
+    const laterBtn = document.getElementById('btnLater');
+
+    async function waitApp() {
+      if (window.__appReady && window.ensurePermissionsGate) return;
+      await new Promise((res) => {
+        const id = setInterval(() => {
+          if (window.__appReady && window.ensurePermissionsGate) {
+            clearInterval(id); res();
+          }
+        }, 50);
       });
     }
+
+    grantBtn?.addEventListener('click', async () => {
+      overlay?.classList.add('hidden');
+      try {
+        await waitApp();                         // ← эндээс алдаа засагдана
+        await window.ensurePermissionsGate();    // CAMERA → GEO
+        await window.ensureCameraOnce();         // Zappar camera
+        await window.startIntroFlow(true);       // урсгал эхлүүлэх
+      } catch (e) {
+        alert(e?.message || e);
+      }
+    }, { passive: true });
+
+    laterBtn?.addEventListener('click', () => {
+      overlay?.classList.add('hidden');
+      // Хэрэглэгч дараа зөвшөөрөх бол зүгээр л хаана
+    }, { passive: true });
   </script>
+
+
+
 </body>
+
 </html>
